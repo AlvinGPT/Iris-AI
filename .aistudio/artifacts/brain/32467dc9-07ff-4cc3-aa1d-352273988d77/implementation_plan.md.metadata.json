@@ -1,6 +1,0 @@
-{
-  "summary":  "Implementation plan for OCURE Coach Revision 5: re-introducing fail-open Camera Check with awaiting_user pause/auto-resume state machine, active-time monotonic clock, priority-queued spoken guidance with multi-rep step cues, and persistent single-GainNode audio pipeline with buffer-level fades, trailing silence, and dev instrumentation to eliminate post-line clicks.",
-  "updatedAt":  "2026-10-28T08:54:37.123418030Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}
