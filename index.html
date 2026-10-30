@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>IRIS</title>
+    <meta name="description" content="IRIS — Screen awareness and eye wellness." />
+    <link rel="icon" type="image/png" href="/assets/iris-emblem-black-32.png" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/png" href="/assets/iris-emblem-white-32.png" media="(prefers-color-scheme: dark)" />
+    <link rel="apple-touch-icon" href="/assets/iris-emblem-black-128.png" />
+    <link rel="preload" as="image" href="/assets/iris-emblem-black-128.png" />
+    <link rel="preload" as="image" href="/assets/iris-emblem-white-128.png" />
+    <link rel="preload" as="image" href="/assets/iris-emblem-black-32.png" />
+    <link rel="preload" as="image" href="/assets/iris-emblem-white-32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700&family=Urbanist:wght@400;500;600;700&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet" />
+    <script>
+      // Gracefully ignore Vite HMR WebSocket connection errors per environment guidelines
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = (reason && (reason.message || String(reason))) || '';
+        var stack = (reason && reason.stack) || '';
+        if (
+          msg.includes('WebSocket') ||
+          msg.includes('createWebSocketModuleRunnerTransport') ||
+          msg.includes('vite') ||
+          stack.includes('@vite/client') ||
+          stack.includes('createWebSocketModuleRunnerTransport')
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      });
+      window.addEventListener('error', function(event) {
+        var msg = event.message || '';
+        var filename = event.filename || '';
+        if (
+          msg.includes('WebSocket') ||
+          filename.includes('@vite/client') ||
+          (event.error && event.error.stack && event.error.stack.includes('@vite/client'))
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      });
+    </script>
+  </head>
+  <body class="bg-black text-white antialiased selection:bg-violet-600 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

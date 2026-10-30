@@ -1,0 +1,11 @@
+{
+  "name": "Remix Remix Remix Remix Remix Remix Iris AI - Multimodal Ophthalmic Habit Lab",
+  "description": "Adaptive ophthalmic habit lab featuring Iris Core, Ocura Coach, and Retis Telemetry Analyst for digital eye strain and ergonomic vision wellness.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
