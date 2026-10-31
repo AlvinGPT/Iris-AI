@@ -104,7 +104,7 @@ IRIS is fully compatible with Linux operating systems using **Wine**:
 <table>
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AlvinGPT"><img src="https://avatars.githubusercontent.com/u/177337501?v=4?s=100" width="100px;" alt="AlvinGPT.exe"/><br /><sub><b>AlvinGPT.exe</b></sub></a><br /><a href="#code-AlvinGPT" title="Code">💻</a> <a href="#bug-AlvinGPT" title="Bug reports">🐛</a> <a href="#design-AlvinGPT" title="Design">🎨</a> <a href="#ideas-AlvinGPT" title="Ideas, Planning, & Feedback">🤔</a> <a href="#test-AlvinGPT" title="Tests">⚠️</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AlvinGPT"><img src="https://avatars.githubusercontent.com/u/177337501?v=4?s=100" width="100px;" alt="AlvinGPT.exe"/><br /><sub><b>AlvinGPT.exe</b></sub></a><br /><a href="#code-AlvinGPT" title="Code">💻</a> <a href="#bug-AlvinGPT" title="Bug reports">🐛</a> <a href="#design-AlvinGPT" title="Design">🎨</a> <a href="#ideas-AlvinGPT" title="Ideas, Planning, & Feedback">🤔</a> <a href="#test-AlvinGPT" title="Tests">⚠️</a> <a href="#research-AlvinGPT" title="Research">🔬</a></td>
     </tr>
   </tbody>
 </table>
