@@ -19,6 +19,7 @@ import { PreferencesModal } from './components/PreferencesModal';
 import { DistanceCalibrationModal } from './components/DistanceCalibrationModal';
 import { BlinkDebugModal } from './components/BlinkDebugModal';
 import { IrisEntrancePortal } from './components/IrisEntrancePortal';
+import { MacTitleBar } from './components/MacTitleBar';
 import { IrisOnboardingFlow } from './components/IrisOnboardingFlow';
 import { IrisOnboardingDocsModal } from './components/IrisOnboardingDocsModal';
 import { StyleChooserScreen } from './components/StyleChooserScreen';
@@ -120,6 +121,11 @@ export default function App() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
     };
+  }, []);
+
+  // Sync historical local telemetry records with the SQLite database
+  useEffect(() => {
+    TelemetryStorageService.syncLocalToDatabase().catch(() => {});
   }, []);
 
   // Initialize verified logs from storage without injecting any mock seed records
@@ -535,9 +541,14 @@ export default function App() {
 
   // Auto-monitoring on app startup/begin: as soon as the app starts up or begins,
   // automatically open the camera and start monitoring the eyes without waiting for user click.
+  // In desktop daemon / hidden boot mode, begins background eye awareness immediately.
   useEffect(() => {
+    const isDesktop = typeof window !== 'undefined' && Boolean((window as any).irisNative?.isDesktop);
+    const isDesktopHidden =
+      typeof window !== 'undefined' && Boolean((window as any).irisNative?.isStartedHidden?.());
+
     if (
-      currentUser &&
+      (currentUser || isDesktop || isDesktopHidden) &&
       hasCompletedOnboarding &&
       !isOnboardingOpen &&
       !isStyleChooserOpen &&
@@ -553,7 +564,7 @@ export default function App() {
         if (!userStoppedMonitoringRef.current && !isMonitoring) {
           startMonitoring();
         }
-      }, 150);
+      }, isDesktopHidden ? 50 : 150);
       return () => clearTimeout(timer);
     }
   }, [
@@ -574,6 +585,7 @@ export default function App() {
     }
 
     let animationFrameId: number;
+    let loopTimerId: any = null;
     let isCancelled = false;
     let lastProcessedVideoTime = -1;
     let lastInferenceTime = 0;
@@ -585,6 +597,19 @@ export default function App() {
 
     blinkDetector.resetTransientState();
     lastValidFrameTimeRef.current = performance.now();
+
+    const scheduleNextIteration = (loopFn: () => void) => {
+      if (isCancelled) return;
+      const isHidden = Boolean(
+        isDocumentHiddenRef.current || (typeof document !== 'undefined' && document.hidden)
+      );
+      if (isHidden) {
+        // Low-CPU 10 FPS timer loop in background daemon mode (E-Core bound)
+        loopTimerId = setTimeout(loopFn, 100);
+      } else {
+        animationFrameId = requestAnimationFrame(loopFn);
+      }
+    };
 
     const initAndRun = async () => {
       try {
@@ -600,10 +625,9 @@ export default function App() {
 
       const processLoop = () => {
         if (isCancelled) return;
-        if (isDocumentHiddenRef.current || (typeof document !== 'undefined' && document.hidden)) {
-          animationFrameId = requestAnimationFrame(processLoop);
-          return;
-        }
+        const isHidden = Boolean(
+          isDocumentHiddenRef.current || (typeof document !== 'undefined' && document.hidden)
+        );
 
         const videoEl = videoRef.current;
         const activeStream = CameraService.getInstance().getStream();
@@ -621,12 +645,13 @@ export default function App() {
         ) {
           const nowTime = performance.now();
           const currentVideoTime = videoEl.currentTime;
+          const minFrameInterval = isHidden ? 90 : 32;
           const isNewFrame =
             Math.abs(currentVideoTime - lastProcessedVideoTime) > 0.0001 ||
-            nowTime - lastInferenceTime >= 32;
+            nowTime - lastInferenceTime >= minFrameInterval;
 
           if (!isNewFrame) {
-            animationFrameId = requestAnimationFrame(processLoop);
+            scheduleNextIteration(processLoop);
             return;
           }
 
@@ -640,7 +665,7 @@ export default function App() {
             lastValidFrameTimeRef.current = nowTime;
             // Privacy guard: if the user disabled camera check for OCURE exercises, do not process frames
             if (!getStoredCameraCheckPref()) {
-              animationFrameId = requestAnimationFrame(processLoop);
+              scheduleNextIteration(processLoop);
               return;
             }
             const detection = landmarkerService.detectVideoFrame(videoEl, 0);
@@ -708,7 +733,7 @@ export default function App() {
                 }));
               }
             }
-            animationFrameId = requestAnimationFrame(processLoop);
+            scheduleNextIteration(processLoop);
             return;
           }
 
@@ -933,10 +958,10 @@ export default function App() {
           }
         }
 
-        animationFrameId = requestAnimationFrame(processLoop);
+        scheduleNextIteration(processLoop);
       };
 
-      animationFrameId = requestAnimationFrame(processLoop);
+      scheduleNextIteration(processLoop);
     };
 
     initAndRun();
@@ -944,6 +969,7 @@ export default function App() {
     return () => {
       isCancelled = true;
       cancelAnimationFrame(animationFrameId);
+      if (loopTimerId) clearTimeout(loopTimerId);
       blinkDetector.resetTransientState();
       landmarkerService.dispose();
     };
@@ -953,16 +979,28 @@ export default function App() {
   useEffect(() => {
     try {
       localStorage.removeItem('iris_guest_access');
+      const storedDesktopUser = localStorage.getItem('iris_desktop_user');
+      if (storedDesktopUser) {
+        const parsed = JSON.parse(storedDesktopUser);
+        if (parsed && parsed.email) {
+          setCurrentUser(parsed as User);
+        }
+      }
     } catch {
       // Safe ignore
     }
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
+      if (user) {
+        setCurrentUser(user);
+      }
     });
     return () => unsubscribe();
   }, []);
 
   const handleSignOut = async () => {
+    try {
+      localStorage.removeItem('iris_desktop_user');
+    } catch {}
     await logOut();
     setCurrentUser(null);
   };
@@ -1184,6 +1222,9 @@ export default function App() {
         muted
         autoPlay
       />
+
+      {/* Custom macOS Traffic Light Controls for Frameless Window */}
+      <MacTitleBar />
 
       {!currentUser ? (
         <IrisEntrancePortal

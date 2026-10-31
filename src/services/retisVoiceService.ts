@@ -165,13 +165,13 @@ class RetisVoiceDiagnosticsStore {
 
 export const RetisVoiceDiagnostics = new RetisVoiceDiagnosticsStore();
 
-export const RETIS_VOICE_NAME = 'Mako';
-export const RETIS_VOICE_ID = 'mako';
+export const RETIS_VOICE_NAME = 'Puck';
+export const RETIS_VOICE_ID = 'puck';
 export const RETIS_VOICE_GENDER = 'male' as const;
-export const RETIS_AISTUDIO_VOICE_PRESET_ID = 'the-game-show-host';
+export const RETIS_AISTUDIO_VOICE_PRESET_ID = 'energetic-male-host';
 export const RETIS_VOICE_DESCRIPTION =
-  'The Game Show Host — Masculine, energetic, lively, natural and expressive (Mako)';
-export const RETIS_LIVE_MODEL = 'gemini-3.8-live';
+  'Energetic, lively, charismatic male voice with dynamic human cadence and multilingual fluency (Google Gemini Puck)';
+export const RETIS_LIVE_MODEL = 'gemini-2.0-flash-exp';
 export const RETIS_LIVE_WS_PATH = '/api/retis-live';
 
 export type RetisSpeechContext = 'greeting' | 'telemetry' | 'warning';
@@ -2059,6 +2059,85 @@ function scheduleSentenceWordBoundaries(
 }
 
 /**
+ * Detect language of the text for accurate multilingual TTS synthesis
+ */
+export function detectSpeechLanguage(text: string): string {
+  const t = text || '';
+  // Malayalam script (\u0D00-\u0D7F)
+  if (/[\u0D00-\u0D7F]/.test(t)) return 'ml-IN';
+  // Arabic script (\u0600-\u06FF, \u0750-\u077F, \u08A0-\u08FF)
+  if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(t)) return 'ar-SA';
+  // Devanagari / Hindi script (\u0900-\u097F)
+  if (/[\u0900-\u097F]/.test(t)) return 'hi-IN';
+  // Tamil script (\u0B80-\u0BFF)
+  if (/[\u0B80-\u0BFF]/.test(t)) return 'ta-IN';
+  // Telugu script (\u0C00-\u0C7F)
+  if (/[\u0C00-\u0C7F]/.test(t)) return 'te-IN';
+  // Bengali script (\u0980-\u09FF)
+  if (/[\u0980-\u09FF]/.test(t)) return 'bn-IN';
+  // Spanish keywords/accents
+  if (/[áéíóúñ¿¡]/i.test(t) || /\b(hola|gracias|pantalla|descanso|postura|ojos)\b/i.test(t)) return 'es-ES';
+  // French keywords/accents
+  if (/[àâçéèêëîïôûùüÿœæ]/i.test(t) || /\b(bonjour|merci|yeux|pause|fatigue)\b/i.test(t)) return 'fr-FR';
+  // German keywords/accents
+  if (/[äöüß]/i.test(t) || /\b(hallo|danke|augen|pause|abstand)\b/i.test(t)) return 'de-DE';
+  // Default to system language if non-English, else en-US
+  if (typeof navigator !== 'undefined' && navigator.language && !navigator.language.startsWith('en')) {
+    return navigator.language;
+  }
+  return 'en-US';
+}
+
+/**
+ * Select the highest-quality, most energetic natural male voice matching target language
+ */
+export function selectBestMultilingualMaleVoice(
+  voices: SpeechSynthesisVoice[],
+  targetLang: string
+): SpeechSynthesisVoice | null {
+  if (!Array.isArray(voices) || voices.length === 0) return null;
+  const langPrefix = targetLang.toLowerCase().slice(0, 2);
+  const langMatchVoices = voices.filter((v) =>
+    (v.lang || '').toLowerCase().replace('_', '-').startsWith(langPrefix)
+  );
+  const pool = langMatchVoices.length > 0 ? langMatchVoices : voices;
+
+  const maleNames = [
+    'guy', 'christopher', 'eric', 'alex', 'daniel', 'midhun', 'madhur',
+    'hamed', 'david', 'male', 'stefan', 'jorge', 'thomas', 'alvaro',
+    'henri', 'mark', 'george', 'ryan', 'puck', 'google'
+  ];
+
+  // 1. Natural/Neural/Online male voice in target language
+  const naturalMale = pool.find((v) => {
+    const nameLower = (v.name || '').toLowerCase();
+    const isMale = maleNames.some((m) => nameLower.includes(m));
+    const isNatural = nameLower.includes('natural') || nameLower.includes('online') || nameLower.includes('neural');
+    return isMale && isNatural;
+  });
+  if (naturalMale) return naturalMale;
+
+  // 2. Any male voice in target language
+  const anyMale = pool.find((v) => {
+    const nameLower = (v.name || '').toLowerCase();
+    return maleNames.some((m) => nameLower.includes(m));
+  });
+  if (anyMale) return anyMale;
+
+  // 3. Any natural voice in target language
+  const anyNatural = pool.find((v) => {
+    const nameLower = (v.name || '').toLowerCase();
+    return nameLower.includes('natural') || nameLower.includes('online') || nameLower.includes('neural');
+  });
+  if (anyNatural) return anyNatural;
+
+  // 4. First voice matching language prefix
+  if (langMatchVoices.length > 0) return langMatchVoices[0];
+
+  return pool[0] || null;
+}
+
+/**
  * Speaks a RETIS AI response aloud using sentence-by-sentence TTS pipelining:
  * - Requests Sentence 1 immediately from `/api/retis-tts` (prebuilt male voice `Puck`, 24kHz PCM)
  *   and starts playback as soon as Sentence 1 decodes, while prefetching Sentence 2+ in parallel.
@@ -2127,24 +2206,16 @@ export function playRetisSpokenReply(
 
     try {
       window.speechSynthesis.cancel();
+      const detectedLang = detectSpeechLanguage(cleanFull);
       const utterance = new window.SpeechSynthesisUtterance(cleanFull);
-      utterance.rate = speechContext === 'warning' ? 0.98 : 1.04;
-      utterance.pitch = 0.98;
-      utterance.lang = 'en-US';
+      utterance.lang = detectedLang;
+      // Energetic, lively male delivery: confident pace and vibrant pitch
+      utterance.rate = speechContext === 'warning' ? 1.02 : 1.08;
+      utterance.pitch = 1.05;
 
       if (typeof window.speechSynthesis.getVoices === 'function') {
         const voices = window.speechSynthesis.getVoices() || [];
-        const preferred =
-          voices.find(
-            (v) =>
-              v.lang?.toLowerCase().startsWith('en') &&
-              (v.name.includes('Guy') ||
-                v.name.includes('Christopher') ||
-                v.name.includes('Eric') ||
-                v.name.includes('Alex') ||
-                v.name.includes('Daniel') ||
-                v.name.includes('Google US English'))
-          ) || voices.find((v) => v.lang?.toLowerCase().startsWith('en'));
+        const preferred = selectBestMultilingualMaleVoice(voices, detectedLang);
         if (preferred) {
           utterance.voice = preferred;
         }
@@ -2717,8 +2788,66 @@ export function streamRetisChatAndVoice(
 
           // 60ms natural breathing space between sentences
           await new Promise((r) => setTimeout(r, 60));
+        } else if (shouldPlayAudio && typeof window !== 'undefined' && window.speechSynthesis) {
+          // Play sentence via energetic multilingual speech synthesis fallback
+          const detectedLang = detectSpeechLanguage(item.text);
+          const estDurMs = Math.max(
+            400,
+            Math.round((sentenceWords.length / CAPTION_READING_WORDS_PER_SEC) * 1000)
+          );
+          options?.onSentenceAudioStart?.(currentPlayIndex, item.text, estDurMs);
+          scheduleSentenceWordBoundaries(
+            sentenceWords,
+            globalWordOffset,
+            totalWordsCount || sentenceWords.length,
+            estDurMs,
+            turnId,
+            options?.onWordBoundary
+          );
+          globalWordOffset += sentenceWords.length;
+
+          await new Promise<void>((resolve) => {
+            if (turnId !== activeRetisTtsTurnId || abortController.signal.aborted) {
+              resolve();
+              return;
+            }
+            try {
+              const utt = new window.SpeechSynthesisUtterance(item.text);
+              utt.lang = detectedLang;
+              utt.rate = 1.08;
+              utt.pitch = 1.05;
+              const voices = window.speechSynthesis.getVoices() || [];
+              const best = selectBestMultilingualMaleVoice(voices, detectedLang);
+              if (best) utt.voice = best;
+
+              let animId: ReturnType<typeof setTimeout> | null = null;
+              let phase = 0;
+              const pulse = () => {
+                if (turnId !== activeRetisTtsTurnId) return;
+                phase += 0.25;
+                const steady = 0.42 + 0.16 * Math.sin(phase);
+                options?.onOutputLevel?.(Number(steady.toFixed(3)));
+                animId = setTimeout(pulse, 50);
+              };
+
+              utt.onstart = () => pulse();
+              utt.onend = () => {
+                if (animId) clearTimeout(animId);
+                options?.onOutputLevel?.(0);
+                resolve();
+              };
+              utt.onerror = () => {
+                if (animId) clearTimeout(animId);
+                options?.onOutputLevel?.(0);
+                resolve();
+              };
+              window.speechSynthesis.speak(utt);
+            } catch {
+              resolve();
+            }
+          });
         } else {
-          // Audio disabled or unavailable: reveal with natural reading duration
+          // Pure muted reading reveal
           const readingDurMs = Math.max(
             300,
             Math.round((sentenceWords.length / CAPTION_READING_WORDS_PER_SEC) * 1000)
@@ -2825,6 +2954,15 @@ export function streamRetisChatAndVoice(
             emittedSentenceCount = Math.max(emittedSentenceCount, idx + 1);
             totalWordsCount += text.split(/\s+/).filter(Boolean).length;
             options?.onSentenceText?.(idx, text);
+
+            // 1500ms watchdog: if sentence_audio is delayed or missing, mark ready so sentence playback never hangs
+            setTimeout(() => {
+              if (turnId === activeRetisTtsTurnId && !item.audioReady) {
+                item.audioReady = true;
+                void pumpQueue();
+              }
+            }, 1500);
+
             void pumpQueue();
           } else if (eventType === 'sentence_audio') {
             const idx = parsedData.index ?? 0;

@@ -157,7 +157,8 @@ export const IrisEntrancePortal: React.FC<IrisEntrancePortalProps> = ({
       onAuthenticated(user);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      const code = (err as { code?: string })?.code;
+      const code = (err as { code?: string })?.code || 'auth/unknown';
+      console.error('Google Sign-In failed:', { code, msg, err });
       if (code === 'auth/popup-closed-by-user' || msg.includes('popup-closed-by-user')) {
         console.warn('Google Sign-In was cancelled or popup closed.');
         setErrorMessage('Sign-in popup was closed. Please try again.');
@@ -165,8 +166,7 @@ export const IrisEntrancePortal: React.FC<IrisEntrancePortalProps> = ({
         console.warn('Google Sign-In popup was blocked by browser.');
         setErrorMessage('Popup was blocked by your browser. Please allow popups for this site.');
       } else {
-        console.error('Google Sign-In failed:', err);
-        setErrorMessage('Google authentication could not be completed. Please try again.');
+        setErrorMessage(`Google authentication error [${code}]: ${msg}`);
       }
     } finally {
       setIsLoading(false);
@@ -389,7 +389,10 @@ export const IrisEntrancePortal: React.FC<IrisEntrancePortalProps> = ({
               className="w-full h-12 px-6 rounded-full btn-pill-primary text-sm flex items-center justify-center gap-3 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed group"
             >
               {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="tracking-tight font-bold">Signing in with Google...</span>
+                </>
               ) : (
                 <>
                   <svg className="w-5 h-5 shrink-0 transition-transform group-hover:scale-105" viewBox="0 0 24 24">

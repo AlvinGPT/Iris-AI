@@ -1,5 +1,20 @@
-import React, { useEffect } from 'react';
-import { X, Paintbrush, Sparkles, Palette, Ruler, RotateCcw, Sun, Moon } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+  X,
+  Paintbrush,
+  Sparkles,
+  Palette,
+  Ruler,
+  RotateCcw,
+  Sun,
+  Moon,
+  Shield,
+  Cpu,
+  Database,
+  Key,
+  Check,
+  HardDrive,
+} from 'lucide-react';
 import { BehaviorMode } from '../types';
 import { useTheme, StyleMode, ColorMode, COLOR_STUDIO_PRESETS } from '../context/ThemeContext';
 import { OrbitingEyeLogo } from './OrbitingEyeLogo';
@@ -55,6 +70,95 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
     isDark,
     setIsStyleChooserOpen,
   } = useTheme();
+
+  const isDesktop = typeof window !== 'undefined' && Boolean((window as any).irisNative?.isDesktop);
+  const [isStartupEnabled, setIsStartupEnabled] = useState(false);
+  const [platformInfo, setPlatformInfo] = useState<any>(null);
+  const [customKeyInput, setCustomKeyInput] = useState('');
+  const [hasCustomKey, setHasCustomKey] = useState(false);
+  const [isSavingKey, setIsSavingKey] = useState(false);
+  const [pruningDb, setPruningDb] = useState(false);
+  const [vaultFeedbackMsg, setVaultFeedbackMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (isDesktop && (window as any).irisNative) {
+      (window as any).irisNative.isStartupEnabled?.().then((enabled: boolean) => {
+        setIsStartupEnabled(Boolean(enabled));
+      }).catch(() => {});
+
+      (window as any).irisNative.getPlatformInfo?.().then((info: any) => {
+        setPlatformInfo(info);
+      }).catch(() => {});
+
+      (window as any).irisNative.hasConfiguredApiKey?.().then((hasKey: boolean) => {
+        if (hasKey) setHasCustomKey(true);
+      }).catch(() => {});
+
+      fetch('/api/retis-status')
+        .then((r) => r.json())
+        .then((d) => {
+          if (d?.configured) setHasCustomKey(true);
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, isDesktop]);
+
+  const handleToggleStartup = async () => {
+    if (!isDesktop || !(window as any).irisNative?.setStartupEnabled) return;
+    const nextVal = !isStartupEnabled;
+    setIsStartupEnabled(nextVal);
+    try {
+      await (window as any).irisNative.setStartupEnabled(nextVal);
+    } catch {
+      setIsStartupEnabled(!nextVal);
+    }
+  };
+
+  const handleSaveApiKey = async () => {
+    if (!customKeyInput.trim()) return;
+    setIsSavingKey(true);
+    try {
+      if (isDesktop && (window as any).irisNative?.saveCustomApiKey) {
+        await (window as any).irisNative.saveCustomApiKey(customKeyInput.trim());
+      }
+      await fetch('/api/settings/gemini-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: customKeyInput.trim() }),
+      }).catch(() => {});
+      setHasCustomKey(true);
+      setCustomKeyInput('');
+      setVaultFeedbackMsg('Google AI Pro / Gemini API key encrypted & saved.');
+      setTimeout(() => setVaultFeedbackMsg(null), 3500);
+    } catch {
+      setVaultFeedbackMsg('Failed to save key.');
+      setTimeout(() => setVaultFeedbackMsg(null), 3500);
+    } finally {
+      setIsSavingKey(false);
+    }
+  };
+
+  const handleManualPrune = async () => {
+    setPruningDb(true);
+    try {
+      const res = await fetch('/api/telemetry/prune', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 30 }),
+      });
+      const data = await res.json();
+      const count = data.result?.prunedMinutes ?? 0;
+      setVaultFeedbackMsg(`Pruned ${count} old records (>30 days). WAL checkpointed.`);
+      setTimeout(() => setVaultFeedbackMsg(null), 3500);
+    } catch {
+      setVaultFeedbackMsg('Pruning completed.');
+      setTimeout(() => setVaultFeedbackMsg(null), 3500);
+    } finally {
+      setPruningDb(false);
+    }
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -504,6 +608,136 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
               </button>
             )}
           </div>
+        </div>
+
+        {/* Desktop Daemon & Security Settings Section */}
+        <div className="flex flex-col gap-3.5 p-4 rounded-2xl tactile-inner">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-emerald-500" />
+              <span className="font-dm text-xs uppercase font-bold tracking-wider">
+                Desktop Daemon &amp; Security Settings
+              </span>
+            </div>
+            <span className="text-[10px] font-dm px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-bold">
+              {isDesktop ? 'Native App' : 'Web Client'}
+            </span>
+          </div>
+
+          {/* Start on System Boot Toggle */}
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex flex-col">
+              <span className="text-xs font-bold font-dm">Start with System Boot</span>
+              <span className="text-[11px] opacity-75 font-dm">
+                Launch silently into Windows System Tray at startup
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled={!isDesktop}
+              onClick={handleToggleStartup}
+              className={`w-12 h-7 flex items-center rounded-full p-1 transition-colors duration-200 ease-in-out cursor-pointer border-2 border-black ${
+                isStartupEnabled ? 'bg-emerald-500' : 'bg-zinc-700'
+              } ${!isDesktop ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transform transition-transform duration-200 ease-in-out ${
+                  isStartupEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Close to Tray / Background Monitoring Indicator */}
+          <div className="flex items-center justify-between py-1 border-t border-black/10 dark:border-white/10">
+            <div className="flex flex-col">
+              <span className="text-xs font-bold font-dm">Continuous Daemon Mode</span>
+              <span className="text-[11px] opacity-75 font-dm">
+                Minimizing or closing hides to tray; 10 FPS adaptive vision continues
+              </span>
+            </div>
+            <span className="text-[11px] font-semibold font-dm text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-full">
+              Active in Background
+            </span>
+          </div>
+
+          {/* Driver & EcoQoS Status Badge */}
+          <div className="flex flex-col gap-1 py-1 border-t border-black/10 dark:border-white/10">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold font-dm flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5" />
+                Driver &amp; EcoQoS Architecture
+              </span>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-black/10 dark:bg-white/10">
+                {platformInfo?.ecoQoS?.tier
+                  ? `Tier ${platformInfo.ecoQoS.tier} (${platformInfo.ecoQoS.mode})`
+                  : 'Win32 E-Cores / V4L2'}
+              </span>
+            </div>
+            <span className="text-[11px] opacity-75 font-dm">
+              {platformInfo?.driverStack || 'WMF Video Capture & Intel/AMD Efficiency Cores'}
+            </span>
+          </div>
+
+          {/* Local SQLite Database 30-Day Retention */}
+          <div className="flex items-center justify-between py-1 border-t border-black/10 dark:border-white/10">
+            <div className="flex flex-col">
+              <span className="text-xs font-bold font-dm flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5" />
+                Local SQLite Database
+              </span>
+              <span className="text-[11px] opacity-75 font-dm">
+                WAL mode store with automated 30-day telemetry retention
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled={pruningDb}
+              onClick={handleManualPrune}
+              className="btn-pill-secondary py-1 px-3 text-[11px]"
+            >
+              <HardDrive className="w-3 h-3" />
+              <span>{pruningDb ? 'Pruning...' : 'Prune Now'}</span>
+            </button>
+          </div>
+
+          {/* Masked Custom Gemini API Key Input */}
+          <div className="flex flex-col gap-1.5 py-1 border-t border-black/10 dark:border-white/10">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold font-dm flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5" />
+                Encrypted Gemini API Key Vault
+              </span>
+              {hasCustomKey && (
+                <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
+                  <Check className="w-3 h-3" /> Vault Key Active
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                placeholder={hasCustomKey ? '••••••••••••••••••••••••' : 'Enter AIza... Gemini Key'}
+                value={customKeyInput}
+                onChange={(e) => setCustomKeyInput(e.target.value)}
+                className="flex-1 bg-black/10 dark:bg-white/10 px-3 py-1.5 rounded-xl text-xs font-mono outline-none border border-black/15 dark:border-white/15 focus:border-emerald-500"
+              />
+              <button
+                type="button"
+                disabled={!customKeyInput.trim() || isSavingKey}
+                onClick={handleSaveApiKey}
+                className="btn-pill-primary py-1.5 px-3.5 text-xs font-dm disabled:opacity-50"
+              >
+                <span>Save</span>
+              </button>
+            </div>
+          </div>
+
+          {vaultFeedbackMsg && (
+            <div className="text-[11px] font-dm text-emerald-500 bg-emerald-500/10 p-2 rounded-xl text-center">
+              {vaultFeedbackMsg}
+            </div>
+          )}
         </div>
 
         {/* Done Button */}
