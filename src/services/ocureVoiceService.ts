@@ -28,7 +28,7 @@ export const OCURE_NEURAL_VOICE_NAME = 'Meditation Guide';
 export const OCURE_NEURAL_VOICE_DESCRIPTION = 'Airy & soothing';
 export const OCURE_NEURAL_VOICE_ID = 'voice_unkpf0tjxq6l';
 export const OCURE_AISTUDIO_VOICE_PRESET_ID = 'voice-meditation-guide';
-export const OCURE_NEURAL_PRIMARY_MODEL = 'gemini-3.8-flash-lite-tts';
+export const OCURE_NEURAL_PRIMARY_MODEL = 'gemini-2.0-flash';
 
 export type VoiceLinePriority = 'step_instruction' | 'camera_prompt' | 'mid_step_nudge';
 

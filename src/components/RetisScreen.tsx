@@ -213,6 +213,7 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
   telemetry,
   onSelectTab,
   onOpenBreakModal,
+  onOpenPreferences,
   userName = 'Hinta Suresh',
   isMonitoring = false,
   cameraStatus = 'idle',
@@ -3618,9 +3619,19 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
 
                 {/* Right: Connection Dot (dot alone when Connected; label only when Not configured/Offline/Error/Voice) + Overflow ... Menu */}
                 <div className="flex items-center gap-2 shrink-0">
-                  <div
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-dm font-semibold"
-                    title={connectionBadgeLabel[connectionState]}
+                  <button
+                    type="button"
+                    onClick={connectionState === 'not_configured' ? onOpenPreferences : undefined}
+                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-dm font-semibold transition-colors ${
+                      connectionState === 'not_configured'
+                        ? 'cursor-pointer hover:bg-amber-500/20 text-amber-500'
+                        : ''
+                    }`}
+                    title={
+                      connectionState === 'not_configured'
+                        ? 'Click to configure Google AI Pro / Gemini API key in Preferences'
+                        : connectionBadgeLabel[connectionState]
+                    }
                   >
                     <span
                       className={`w-2.5 h-2.5 rounded-full ${
@@ -3634,7 +3645,7 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
                     {connectionState !== 'connected' && connectionState !== 'standby' && (
                       <span>{connectionBadgeLabel[connectionState]}</span>
                     )}
-                  </div>
+                  </button>
 
                   {/* Overflow (...) Menu: Recalibrate Distance & Delete chat */}
                   <div ref={convOverflowRef} className="relative">

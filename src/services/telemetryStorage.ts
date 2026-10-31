@@ -9,7 +9,7 @@ const MAX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days retention policy
 
 export class TelemetryStorageService {
   /**
-   * Save an aggregate 1-minute bucket to local storage
+   * Save an aggregate 1-minute bucket to local storage and sync to SQLite database
    */
   public static saveBucket(record: StoredAggregateTelemetry): void {
     try {
@@ -23,6 +23,9 @@ export class TelemetryStorageService {
     } catch {
       // Safe fallback if localStorage quota exceeded
     }
+
+    // Asynchronously sync bucket to SQLite local database
+    this.syncMinuteToDatabase(record).catch(() => {});
   }
 
   /**
@@ -375,7 +378,76 @@ export class TelemetryStorageService {
     const current = this.getSessionLogs();
     const updated = [log, ...current].slice(0, 100);
     this.saveSessionLogs(updated);
+
+    // Asynchronously sync break log to SQLite local database
+    this.syncBreakLogToDatabase(log).catch(() => {});
     return updated;
+  }
+
+  /**
+   * Sync a single 1-minute bucket to the local SQLite database
+   */
+  public static async syncMinuteToDatabase(record: StoredAggregateTelemetry): Promise<void> {
+    try {
+      await fetch('/api/telemetry/minute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
+      });
+    } catch {
+      // Offline fallback
+    }
+  }
+
+  /**
+   * Sync a single break log to the local SQLite database
+   */
+  public static async syncBreakLogToDatabase(log: EyeBreakLog): Promise<void> {
+    try {
+      await fetch('/api/telemetry/break-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(log),
+      });
+    } catch {
+      // Offline fallback
+    }
+  }
+
+  /**
+   * Sync local storage telemetry records to SQLite database in bulk
+   */
+  public static async syncLocalToDatabase(): Promise<void> {
+    try {
+      const records = this.getRecords();
+      if (records.length > 0) {
+        await fetch('/api/telemetry/minute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(records),
+        });
+      }
+      const logs = this.getSessionLogs();
+      for (const log of logs.slice(0, 50)) {
+        await this.syncBreakLogToDatabase(log);
+      }
+    } catch {
+      // Offline fallback
+    }
+  }
+
+  /**
+   * Fetch deterministic analytical ground-truth snapshot from local SQLite database
+   */
+  public static async fetchDeterministicSnapshot(): Promise<any | null> {
+    try {
+      const res = await fetch('/api/telemetry/deterministic-snapshot');
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.snapshot || null;
+    } catch {
+      return null;
+    }
   }
 
   public static clearSessionLogs(): void {

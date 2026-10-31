@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import { WebSocketServer, WebSocket } from 'ws';
+import { getIrisDatabase, IrisDatabase } from './server/database.ts';
+import { getGeminiApiKey, saveToVault } from './electron/securityVault.ts';
 import {
   GoogleGenAI,
   Type,
@@ -15,50 +17,75 @@ import {
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const getScriptDir = (): string => {
+  try {
+    if (typeof __dirname !== 'undefined' && __dirname) return __dirname;
+    if (typeof import.meta?.url === 'string') {
+      return path.dirname(fileURLToPath(import.meta.url));
+    }
+  } catch {
+    // fallback
+  }
+  return process.cwd();
+};
+
+const appDir = getScriptDir();
 
 const app = express();
 const port = parseInt(process.env.PORT || '3000', 10);
 
+// Ensure Cross-Origin-Opener-Policy does not block Firebase OAuth popup communication with window.opener
+app.use((_req, res, next) => {
+  res.removeHeader('Cross-Origin-Opener-Policy');
+  res.removeHeader('Cross-Origin-Embedder-Policy');
+  next();
+});
+
 app.use(express.json({ limit: '2mb' }));
 
-// Single config constants for Gemini models (using fast gemini-3.1-flash-lite by default for instant replies)
-const RETIS_PRIMARY_MODEL = 'gemini-3.1-flash-lite';
-const RETIS_FALLBACK_MODEL = 'gemini-3.8-flash';
-const RETIS_LIVE_MODEL = 'gemini-3.8-live';
-const RETIS_TTS_PRIMARY_MODEL = 'gemini-3.8-flash-tts';
-const RETIS_TTS_FALLBACK_MODEL = 'gemini-3.8-flash-lite-tts';
-const RETIS_VOICE_NAME = 'Mako';
-const RETIS_VOICE_ID = 'mako';
+// Single config constants for Gemini models (Official Google AI Studio / Gemini API models)
+const RETIS_PRO_MODEL = 'gemini-2.5-pro';
+const RETIS_PRIMARY_MODEL = 'gemini-2.5-flash';
+const RETIS_FAST_MODEL = 'gemini-2.0-flash';
+const RETIS_FALLBACK_MODEL = 'gemini-1.5-flash';
+const RETIS_TTS_PRIMARY_MODEL = 'gemini-2.0-flash';
+const RETIS_TTS_FALLBACK_MODEL = 'gemini-2.5-flash';
+const RETIS_LIVE_MODEL = 'gemini-2.0-flash-exp';
+const RETIS_VOICE_NAME = 'Puck';
+const RETIS_VOICE_ID = 'puck';
 const RETIS_VOICE_GENDER = 'male';
-const RETIS_AISTUDIO_VOICE_PRESET_ID = 'the-game-show-host';
+const RETIS_AISTUDIO_VOICE_PRESET_ID = 'energetic-male-host';
 const RETIS_VOICE_DESCRIPTION =
-  'Masculine, energetic, lively, clear and expressive host (The Game Show Host preset)';
+  'Masculine, energetic, lively, clear and expressive host (Google Gemini Puck energetic male voice)';
 const RETIS_VOICE_BASE_PROMPT =
-  'The Game Show Host preset: A masculine, energetic, lively, clear, light, and expressive conversational host with natural, human-sounding intonation and confident delivery. Speak with charismatic warmth, clear diction, and natural conversational cadence.';
+  'A masculine, dynamic, enthusiastic, and energetic conversational host with lively human cadence, natural inflections, clear diction, and multilingual fluency. Speak with charismatic warmth, vibrant pacing, and authentic native pronunciation in whichever language is requested or spoken (including Malayalam, English, Arabic, Hindi, etc.).';
 
-const OCURE_FAST_MODEL = 'gemini-3.1-flash-lite';
-const OCURE_STANDARD_MODEL = 'gemini-3.8-flash';
-const OCURE_LIVE_MODEL = 'gemini-3.8-live';
-const OCURE_TTS_PRIMARY_MODEL = 'gemini-3.8-flash-lite-tts';
-const OCURE_TTS_FALLBACK_MODEL = 'gemini-3.8-flash-tts';
+const OCURE_FAST_MODEL = 'gemini-2.0-flash';
+const OCURE_STANDARD_MODEL = 'gemini-2.5-flash';
+const OCURE_LIVE_MODEL = 'gemini-2.0-flash-exp';
+const OCURE_TTS_PRIMARY_MODEL = 'gemini-2.0-flash';
+const OCURE_TTS_FALLBACK_MODEL = 'gemini-2.5-flash';
 const OCURE_VOICE_LABEL = 'Meditation Guide';
 const OCURE_VOICE_DESCRIPTION = 'Airy & soothing';
 const OCURE_AISTUDIO_PRESET_ID = 'voice-meditation-guide';
 const OCURE_MEDITATION_GUIDE_PROMPT =
   'A soft, airy female voice in her 40s, lower-middle pitch. Very slow, unhurried pace with gentle pauses for breath. Warm, soothing, almost whispered delivery, close to the mic, no sharp consonants. Neutral accent with a calm, reassuring smile in the tone.';
 const OCURE_DEFAULT_STORED_VOICE_ID = 'voice_unkpf0tjxq6l';
-const OCURE_LIVE_PREBUILT_VOICE_NAME = 'Vindemiatrix';
+const OCURE_LIVE_PREBUILT_VOICE_NAME = 'Kore';
 const OCURE_VOICE_NAME = OCURE_VOICE_LABEL;
 
 function getApiKey(): string {
-  return (process.env.GEMINI_API_KEY || '').trim();
+  return getGeminiApiKey();
 }
 
 function checkApiKeyConfigured(): boolean {
   const key = getApiKey();
-  return Boolean(key && key !== 'MY_GEMINI_API_KEY');
+  return Boolean(
+    key &&
+    key !== 'MY_GEMINI_API_KEY' &&
+    key.length > 10 &&
+    !key.startsWith('AIzaSyAa') // Exclude the restricted Firebase Auth key
+  );
 }
 
 let cachedAiClient: GoogleGenAI | null = null;
@@ -340,10 +367,212 @@ function isPureOutOfScopeQuery(text: string): boolean {
   );
 }
 
+// =========================================================================
+// GOOGLE OAUTH 2.0 DESKTOP LOOPBACK AUTHENTICATION (RFC 8252)
+// =========================================================================
+
+const GOOGLE_DESKTOP_CLIENT_ID = '764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com';
+const GOOGLE_DESKTOP_CLIENT_SECRET = 'd-FL95Q19q7MQmFpd7hHD0Ty';
+
+interface DesktopAuthSession {
+  state: string;
+  idToken?: string;
+  accessToken?: string;
+  user?: {
+    uid: string;
+    email: string | null;
+    displayName: string | null;
+    photoURL: string | null;
+    idToken?: string;
+    accessToken?: string;
+  };
+  createdAt: number;
+}
+
+const desktopAuthSessions = new Map<string, DesktopAuthSession>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of desktopAuthSessions.entries()) {
+    if (now - val.createdAt > 10 * 60 * 1000) {
+      desktopAuthSessions.delete(key);
+    }
+  }
+}, 60000);
+
+// Endpoint to retrieve completed session
+app.get('/api/auth/desktop-session', (req, res) => {
+  const state = (req.query.state as string) || 'latest';
+  const session = desktopAuthSessions.get(state) || desktopAuthSessions.get('latest');
+  if (session && Date.now() - session.createdAt < 5 * 60 * 1000) {
+    desktopAuthSessions.delete(state);
+    desktopAuthSessions.delete('latest');
+    return res.json({ status: 'ready', session });
+  }
+  return res.json({ status: 'pending' });
+});
+
+// OAuth 2.0 Loopback Callback Endpoint (Handles Google redirect directly)
+app.get('/auth/callback', async (req, res) => {
+  const code = req.query.code as string;
+  const error = req.query.error as string;
+  const currentPort = (req.socket.localPort) || port;
+
+  if (error || !code) {
+    res.status(400).send(`<!DOCTYPE html><html><body style="background:#0c0f14;color:#f87171;font-family:sans-serif;padding:40px;text-align:center"><h2>Google Sign-In Cancelled</h2><p>${error || 'No authorization code provided'}</p></body></html>`);
+    return;
+  }
+
+  try {
+    const redirectUri = `http://127.0.0.1:${currentPort}/auth/callback`;
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: GOOGLE_DESKTOP_CLIENT_ID,
+        client_secret: GOOGLE_DESKTOP_CLIENT_SECRET,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+      }),
+    });
+
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error_description || tokenData.error || 'Failed to exchange authorization code');
+    }
+
+    // Fetch user profile from Google UserInfo endpoint
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const profile = await profileRes.json();
+
+    const userPayload = {
+      uid: profile.sub || 'google_' + Date.now(),
+      email: profile.email || '',
+      displayName: profile.name || (profile.email ? profile.email.split('@')[0] : 'Iris Member'),
+      photoURL: profile.picture || '',
+      idToken: tokenData.id_token || '',
+      accessToken: tokenData.access_token || '',
+    };
+
+    desktopAuthSessions.set('latest', {
+      state: 'latest',
+      idToken: userPayload.idToken,
+      accessToken: userPayload.accessToken,
+      user: userPayload,
+      createdAt: Date.now(),
+    });
+
+    // Notify Electron main process if running inside Electron desktop
+    if (typeof (global as any).notifyDesktopAuthSuccess === 'function') {
+      try {
+        (global as any).notifyDesktopAuthSuccess(userPayload);
+      } catch (notifyErr) {
+        console.warn('Failed to notify Electron desktop window:', notifyErr);
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Signed in to IRIS AI Studio</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 50% 20%, #171d26 0%, #0c0f14 100%);
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+    .card {
+      background: rgba(22, 28, 36, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px;
+      padding: 40px 32px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    }
+    .check-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: rgba(34, 197, 94, 0.15);
+      color: #22c55e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 28px;
+      font-weight: bold;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #ffffff; }
+    p { font-size: 14px; color: #94a3b8; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="check-icon">✓</div>
+    <h1>Signed in as ${userPayload.displayName || userPayload.email}!</h1>
+    <p>Authentication complete. You can close this tab and return to IRIS AI Studio.</p>
+  </div>
+  <script>
+    setTimeout(() => {
+      try { window.close(); } catch(e) {}
+    }, 1200);
+  </script>
+</body>
+</html>`);
+  } catch (err: any) {
+    console.error('[Auth Callback Error]:', err);
+    res.status(500).send(`<!DOCTYPE html><html><body style="background:#0c0f14;color:#f87171;font-family:sans-serif;padding:40px;text-align:center"><h2>Google Sign-In Error</h2><p>${err.message || String(err)}</p></body></html>`);
+  }
+});
+
 app.get('/api/retis-status', (_req, res) => {
   res.json({
     configured: checkApiKeyConfigured(),
+    provider: 'Google AI Pro / AI Studio (@google/genai)',
+    primaryModel: RETIS_PRIMARY_MODEL,
+    proModel: RETIS_PRO_MODEL,
+    ttsModel: RETIS_TTS_PRIMARY_MODEL,
+    voiceName: RETIS_VOICE_NAME,
   });
+});
+
+app.post('/api/settings/gemini-key', (req, res) => {
+  try {
+    const { apiKey } = req.body || {};
+    if (typeof apiKey === 'string' && apiKey.trim().length > 10) {
+      const clean = apiKey.trim();
+      saveToVault('gemini_api_key', clean);
+      process.env.GEMINI_API_KEY = clean;
+      cachedAiKey = '';
+      cachedAiClient = null;
+      console.log('[Server] Saved new Gemini API key to secure vault.');
+      return res.json({ success: true, configured: true });
+    } else if (apiKey === '' || apiKey === null) {
+      saveToVault('gemini_api_key', '');
+      process.env.GEMINI_API_KEY = '';
+      cachedAiKey = '';
+      cachedAiClient = null;
+      return res.json({ success: true, configured: false });
+    }
+    return res.status(400).json({ error: 'Invalid API key format.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to save key' });
+  }
 });
 
 app.get('/api/ocure-voice-info', async (_req, res) => {
@@ -368,6 +597,175 @@ app.get('/api/ocure-voice-info', async (_req, res) => {
     liveModel: OCURE_LIVE_MODEL,
     livePrebuiltVoice: OCURE_LIVE_PREBUILT_VOICE_NAME,
   });
+});
+
+/**
+ * Enriches client telemetry snapshots with deterministic SQLite SQL ground truth.
+ * Ensures zero hallucination for RETIS and OCURE even if frontend state is fresh or missing metrics.
+ */
+function enrichSnapshotWithSqlGroundTruth(clientSnapshot: any): Record<string, any> {
+  try {
+    const db = getIrisDatabase();
+    const dbSnap = db.getDeterministicSnapshot();
+    const merged = { ...(clientSnapshot || {}) };
+    const clientMetrics = { ...(merged.metrics || {}) };
+
+    // If client metrics are missing, unavailable, or empty, fill with deterministic SQLite values
+    if (
+      (!clientMetrics.blink_rate_bpm?.value || clientMetrics.blink_rate_bpm.value === null) &&
+      dbSnap.metrics.blink_rate_bpm.value !== null
+    ) {
+      clientMetrics.blink_rate_bpm = dbSnap.metrics.blink_rate_bpm;
+    }
+    if (
+      (!clientMetrics.avg_distance_cm?.value || clientMetrics.avg_distance_cm.value === null) &&
+      dbSnap.metrics.avg_distance_cm.value !== null
+    ) {
+      clientMetrics.avg_distance_cm = dbSnap.metrics.avg_distance_cm;
+      clientMetrics.screen_distance_cm = dbSnap.metrics.avg_distance_cm;
+    }
+    if (
+      (!clientMetrics.total_validated_blinks?.value || clientMetrics.total_validated_blinks.value === 0) &&
+      dbSnap.metrics.total_validated_blinks.value > 0
+    ) {
+      clientMetrics.total_validated_blinks = dbSnap.metrics.total_validated_blinks;
+      clientMetrics.validated_blinks = dbSnap.metrics.total_validated_blinks;
+    }
+    if (
+      (!clientMetrics.completed_breaks?.value || clientMetrics.completed_breaks.value === 0) &&
+      dbSnap.metrics.completed_breaks.value > 0
+    ) {
+      clientMetrics.completed_breaks = dbSnap.metrics.completed_breaks;
+    }
+    if (
+      (!clientMetrics.distance_warnings?.value || clientMetrics.distance_warnings.value === 0) &&
+      dbSnap.metrics.distance_warnings.value > 0
+    ) {
+      clientMetrics.distance_warnings = dbSnap.metrics.distance_warnings;
+    }
+    if (
+      (!clientMetrics.seven_day_avg_blink_rate?.value || clientMetrics.seven_day_avg_blink_rate.value === null) &&
+      dbSnap.metrics.seven_day_avg_blink_rate.value !== null
+    ) {
+      clientMetrics.seven_day_avg_blink_rate = dbSnap.metrics.seven_day_avg_blink_rate;
+    }
+    if (
+      (!clientMetrics.seven_day_avg_distance_cm?.value || clientMetrics.seven_day_avg_distance_cm.value === null) &&
+      dbSnap.metrics.seven_day_avg_distance_cm.value !== null
+    ) {
+      clientMetrics.seven_day_avg_distance_cm = dbSnap.metrics.seven_day_avg_distance_cm;
+    }
+    if (!merged.trackedDaysCount || merged.trackedDaysCount === 0) {
+      merged.trackedDaysCount = dbSnap.activeDaysCount7d;
+    }
+    if (
+      (!merged.observedDurationFormatted || merged.observedDurationFormatted === '0m 0s') &&
+      dbSnap.metrics.observed_duration.value > 0
+    ) {
+      merged.observedDurationFormatted = dbSnap.metrics.observed_duration.formatted;
+    }
+    if (!merged.reportingPeriod || merged.reportingPeriod === 'No observations recorded yet') {
+      merged.reportingPeriod = dbSnap.reportingPeriod;
+    }
+    merged.metrics = clientMetrics;
+    merged.sqlGroundTruth = dbSnap.sqlGroundTruth;
+    return merged;
+  } catch (err) {
+    console.warn('[Snapshot Enrichment] Failed to read SQLite ground truth:', err);
+    return clientSnapshot || {};
+  }
+}
+
+// ==========================================
+// Local SQLite Telemetry Database Endpoints
+// ==========================================
+
+// Save a single or batch of 1-minute aggregate telemetry buckets
+app.post('/api/telemetry/minute', (req, res) => {
+  try {
+    const db = getIrisDatabase();
+    const data = req.body;
+    if (Array.isArray(data)) {
+      const inserted = db.saveMinuteTelemetryBatch(data);
+      return res.json({ success: true, count: inserted });
+    } else if (data && typeof data === 'object') {
+      db.saveMinuteTelemetry(data);
+      return res.json({ success: true, count: 1 });
+    }
+    return res.status(400).json({ error: 'Payload must be a telemetry record or array of records.' });
+  } catch (err: any) {
+    console.error('[Database API] Error saving minute telemetry:', err);
+    return res.status(500).json({ error: err.message || 'Failed to save minute telemetry' });
+  }
+});
+
+// Retrieve authoritative deterministic snapshot (exact 24h & 7d SQL aggregates)
+app.get('/api/telemetry/deterministic-snapshot', (_req, res) => {
+  try {
+    const db = getIrisDatabase();
+    const snapshot = db.getDeterministicSnapshot();
+    return res.json({ success: true, snapshot });
+  } catch (err: any) {
+    console.error('[Database API] Error retrieving deterministic snapshot:', err);
+    return res.status(500).json({ error: err.message || 'Failed to compute deterministic snapshot' });
+  }
+});
+
+// Retrieve minute telemetry records within retention window
+app.get('/api/telemetry/history', (req, res) => {
+  try {
+    const limit = parseInt((req.query.limit as string) || '500', 10);
+    const days = parseInt((req.query.days as string) || '30', 10);
+    const db = getIrisDatabase();
+    const records = db.getMinuteTelemetry(limit, days);
+    return res.json({ success: true, records });
+  } catch (err: any) {
+    console.error('[Database API] Error retrieving telemetry history:', err);
+    return res.status(500).json({ error: err.message || 'Failed to retrieve telemetry history' });
+  }
+});
+
+// Save a completed or updated eye-break log
+app.post('/api/telemetry/break-log', (req, res) => {
+  try {
+    const db = getIrisDatabase();
+    const log = req.body;
+    if (!log || typeof log !== 'object') {
+      return res.status(400).json({ error: 'Valid break log payload is required.' });
+    }
+    db.saveBreakLog(log);
+    return res.json({ success: true, id: log.id });
+  } catch (err: any) {
+    console.error('[Database API] Error saving break log:', err);
+    return res.status(500).json({ error: err.message || 'Failed to save break log' });
+  }
+});
+
+// Retrieve break logs
+app.get('/api/telemetry/break-logs', (req, res) => {
+  try {
+    const limit = parseInt((req.query.limit as string) || '50', 10);
+    const days = parseInt((req.query.days as string) || '30', 10);
+    const db = getIrisDatabase();
+    const logs = db.getBreakLogs(limit, days);
+    return res.json({ success: true, logs });
+  } catch (err: any) {
+    console.error('[Database API] Error retrieving break logs:', err);
+    return res.status(500).json({ error: err.message || 'Failed to retrieve break logs' });
+  }
+});
+
+// Manually or automatically trigger 30-day retention pruning
+app.post('/api/telemetry/prune', (req, res) => {
+  try {
+    const days = parseInt(req.body?.days || (req.query.days as string) || '30', 10);
+    const db = getIrisDatabase();
+    const result = db.pruneOldTelemetry(days);
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error('[Database API] Error pruning telemetry:', err);
+    return res.status(500).json({ error: err.message || 'Failed to prune telemetry' });
+  }
 });
 
 function buildAuthoritativeSnapshotFallbackJson(
@@ -563,7 +961,8 @@ function buildAuthoritativeSnapshotFallbackJson(
 
 app.post('/api/retis-chat', async (req, res) => {
   try {
-    const { question, focusMetricId, history, snapshot, messages } = req.body || {};
+    const { question, focusMetricId, history, snapshot: rawSnapshot, messages } = req.body || {};
+    const snapshot = enrichSnapshotWithSqlGroundTruth(rawSnapshot);
 
     const rawUserQuestion: string =
       typeof question === 'string' && question.trim()
@@ -745,26 +1144,24 @@ ${rawUserQuestion.slice(0, 1000)}
       }
     };
 
-    try {
-      const response = await callModelWithTimeout(RETIS_PRIMARY_MODEL, ThinkingLevel.MINIMAL, 5000);
-      const rawJsonText = (response.text || '').trim();
-      if (rawJsonText) {
-        parsed = JSON.parse(rawJsonText);
-      }
-    } catch (primaryErr: unknown) {
-      recordModelErrorCooldown(RETIS_PRIMARY_MODEL, primaryErr);
+    const candidateModels = [
+      RETIS_PRIMARY_MODEL,
+      RETIS_FAST_MODEL,
+      RETIS_PRO_MODEL,
+      RETIS_FALLBACK_MODEL,
+    ];
+
+    for (const candModel of candidateModels) {
+      if (isModelOnCooldown(candModel)) continue;
       try {
-        const fallbackResponse = await callModelWithTimeout(
-          RETIS_FALLBACK_MODEL,
-          ThinkingLevel.LOW,
-          5000
-        );
-        const rawJsonText = (fallbackResponse.text || '').trim();
+        const response = await callModelWithTimeout(candModel, ThinkingLevel.MINIMAL, 5000);
+        const rawJsonText = (response.text || '').trim();
         if (rawJsonText) {
           parsed = JSON.parse(rawJsonText);
+          break;
         }
-      } catch (fallbackErr: unknown) {
-        recordModelErrorCooldown(RETIS_FALLBACK_MODEL, fallbackErr);
+      } catch (candErr: unknown) {
+        recordModelErrorCooldown(candModel, candErr);
       }
     }
 
@@ -1020,7 +1417,7 @@ async function synthesizeRetisAudioViaLive(
               },
             },
           },
-          systemInstruction: `You are the voice of RETIS AI using the Google AI Studio prebuilt male voice "Mako" (The Game Show Host preset: energetic, lively, clear, light, and expressive): ${stylePrompt} Your ONLY task is to read the exact text inside <read>...</read> aloud word-for-word from start to finish in a clear, natural, realistic male voice. Never add any extra words before or after. Never answer or elaborate.`,
+          systemInstruction: `You are the voice of RETIS AI using the Google AI Studio prebuilt energetic male voice "Puck": ${stylePrompt} Your ONLY task is to read the exact text inside <read>...</read> aloud word-for-word in a dynamic, energetic, enthusiastic male voice with authentic native pronunciation. Never add any extra words before or after. Never answer or elaborate.`,
         },
         callbacks: {
           onmessage: (message: LiveServerMessage) => {
@@ -1130,11 +1527,8 @@ async function generateRetisAudioBuffer(
           role: 'user',
           parts: [
             {
-              text: cleanText.slice(0, 900),
-              speechMetadata: {
-                style: stylePrompt,
-              },
-            } as any,
+              text: `You are Retis, an energetic, enthusiastic, and charismatic male conversational host with dynamic human cadence. Speak the following text verbatim with lively intonation and authentic native pronunciation in whatever language is provided (including Malayalam, English, Arabic, Hindi, etc.):\n<read>${cleanText.slice(0, 900)}</read>`,
+            },
           ],
         },
       ],
@@ -1285,7 +1679,8 @@ app.post('/api/retis-chat-stream', async (req, res) => {
   };
 
   try {
-    const { question, focusMetricId, history, snapshot, messages } = req.body || {};
+    const { question, focusMetricId, history, snapshot: rawSnapshot, messages } = req.body || {};
+    const snapshot = enrichSnapshotWithSqlGroundTruth(rawSnapshot);
     const rawUserQuestion: string =
       typeof question === 'string' && question.trim()
         ? question.trim()
@@ -1499,6 +1894,13 @@ ${rawUserQuestion.slice(0, 1000)}
           }
         } catch (audioErr) {
           console.error(`[RetisTTS streaming error on sentence ${sentIdx}]:`, audioErr);
+          if (!clientDisconnected) {
+            sendEvent('sentence_audio', {
+              index: sentIdx,
+              failed: true,
+              error: audioErr instanceof Error ? audioErr.message : 'Audio synthesis failed',
+            });
+          }
         }
       })();
 
@@ -1553,39 +1955,20 @@ ${rawUserQuestion.slice(0, 1000)}
       }
     };
 
-    let streamErrorOccurred = false;
-    try {
-      const stream = await ai.models.generateContentStream({
-        model: RETIS_PRIMARY_MODEL,
-        contents,
-        config: {
-          systemInstruction: RETIS_SYSTEM_INSTRUCTION,
-          responseMimeType: 'application/json',
-          responseSchema: RETIS_RESPONSE_SCHEMA,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
-        },
-      });
+    const streamModels = [RETIS_PRIMARY_MODEL, RETIS_FAST_MODEL, RETIS_PRO_MODEL, RETIS_FALLBACK_MODEL];
+    let streamSucceeded = false;
 
-      for await (const chunk of stream) {
-        if (clientDisconnected) break;
-        const piece = chunk.text || '';
-        accumulatedJson += piece;
-        processIncrementalChars(piece);
-      }
-    } catch (err) {
-      streamErrorOccurred = true;
-      recordModelErrorCooldown(RETIS_PRIMARY_MODEL, err);
-    }
-
-    if (streamErrorOccurred && !clientDisconnected) {
+    for (const candModel of streamModels) {
+      if (isModelOnCooldown(candModel)) continue;
       try {
-        const fallbackStream = await ai.models.generateContentStream({
-          model: RETIS_FALLBACK_MODEL,
+        const stream = await ai.models.generateContentStream({
+          model: candModel,
           contents,
           config: {
             systemInstruction: RETIS_SYSTEM_INSTRUCTION,
             responseMimeType: 'application/json',
             responseSchema: RETIS_RESPONSE_SCHEMA,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
           },
         });
 
@@ -1594,15 +1977,27 @@ ${rawUserQuestion.slice(0, 1000)}
         inAnswerString = false;
         isEscaped = false;
 
-        for await (const chunk of fallbackStream) {
+        for await (const chunk of stream) {
           if (clientDisconnected) break;
           const piece = chunk.text || '';
           accumulatedJson += piece;
           processIncrementalChars(piece);
         }
-      } catch (fbErr) {
-        recordModelErrorCooldown(RETIS_FALLBACK_MODEL, fbErr);
+        streamSucceeded = true;
+        break;
+      } catch (streamErr) {
+        recordModelErrorCooldown(candModel, streamErr);
       }
+    }
+
+    if (!streamSucceeded && emittedCount === 0 && !clientDisconnected) {
+      // Clean deterministic fallback using local SQLite snapshot
+      const fallbackStructured = buildAuthoritativeSnapshotFallbackJson(
+        rawUserQuestion,
+        focusMetricId,
+        snapshot
+      );
+      return await streamPreComputed(fallbackStructured);
     }
 
     if (answerBuffer.trim()) {
@@ -1690,7 +2085,8 @@ Rules you must follow on every turn:
 
 app.post('/api/ocure-chat', async (req, res) => {
   try {
-    const { message, history, snapshot, speedMode = 'fast', stream = true } = req.body || {};
+    const { message, history, snapshot: rawSnapshot, speedMode = 'fast', stream = true } = req.body || {};
+    const snapshot = enrichSnapshotWithSqlGroundTruth(rawSnapshot);
 
     const rawUserMessage = typeof message === 'string' ? message.trim() : '';
     if (!rawUserMessage) {
@@ -2438,7 +2834,8 @@ Rules you must follow on every turn:
 6. Keep spoken replies concise and conversational (2 to 3 focused sentences) and stay strictly within IRIS screen habits, blink rate, screen distance, alerts, session duration, fatigue score, breaks, reports, heat map, and trends.`;
 
 function formatLiveTelemetrySnapshotForSession(snapshot: Record<string, any>): string {
-  const m = snapshot?.metrics || {};
+  const enriched = enrichSnapshotWithSqlGroundTruth(snapshot);
+  const m = enriched?.metrics || {};
   const pickFormatted = (entry: any, fallback: string): string => {
     if (!entry || typeof entry !== 'object') return fallback;
     const val = entry.formatted ?? entry.formattedValue;
@@ -2473,9 +2870,53 @@ function formatLiveTelemetrySnapshotForSession(snapshot: Record<string, any>): s
 }
 
 // Vite middleware or production static serving
-const distPath = path.resolve(__dirname, 'dist');
+const resolveDistPath = (explicit?: string): string => {
+  if (explicit && fs.existsSync(path.resolve(explicit, 'index.html'))) {
+    return explicit;
+  }
+  if (process.env.IRIS_DIST_PATH && fs.existsSync(path.resolve(process.env.IRIS_DIST_PATH, 'index.html'))) {
+    return process.env.IRIS_DIST_PATH;
+  }
+  const candidates = [
+    path.resolve(appDir, '../dist'),
+    path.resolve(appDir, 'dist'),
+    path.resolve(process.cwd(), 'dist'),
+    path.resolve(process.cwd(), 'release/win-unpacked/resources/app.asar/dist'),
+    path.resolve((process as any).resourcesPath || '', 'app.asar', 'dist'),
+    path.resolve((process as any).resourcesPath || '', 'dist'),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(path.resolve(c, 'index.html'))) {
+      return c;
+    }
+  }
+  return path.resolve(appDir, '../dist');
+};
 
-async function startServer() {
+const distPath = resolveDistPath();
+
+export interface IrisServerInstance {
+  server: http.Server;
+  app: express.Express;
+  wss: WebSocketServer;
+  db: IrisDatabase;
+  port: number;
+  close: () => Promise<void>;
+}
+
+let activeServerInstance: IrisServerInstance | null = null;
+
+export async function startServer(options?: {
+  port?: number;
+  dbPath?: string;
+  distPath?: string;
+}): Promise<IrisServerInstance> {
+  if (activeServerInstance) {
+    return activeServerInstance;
+  }
+
+
+  const db = getIrisDatabase(options?.dbPath);
   const server = http.createServer(app);
 
   // Real-time Gemini Live API WebSocket bridge on /api/retis-live (and /api/ocure-live)
@@ -2685,14 +3126,59 @@ async function startServer() {
     });
   });
 
-  const hasBuiltDist = fs.existsSync(path.resolve(distPath, 'index.html'));
+  const effectiveDistPath = resolveDistPath(options?.distPath);
+  const distHtmlPath = path.resolve(effectiveDistPath, 'index.html');
+  const hasBuiltDist = fs.existsSync(distHtmlPath);
+  const isElectron = Boolean(process.versions.electron);
   const isProd =
-    (process.env.NODE_ENV === 'production' ||
-      process.env.npm_lifecycle_event === 'start' ||
-      Boolean(process.env.K_SERVICE)) &&
+    isElectron ||
+    process.env.NODE_ENV === 'production' ||
+    process.env.npm_lifecycle_event === 'start' ||
+    Boolean(process.env.K_SERVICE) ||
     hasBuiltDist;
 
-  if (!isProd) {
+  if (isProd) {
+    console.log(`[Iris Server] Serving static production build from: ${effectiveDistPath}`);
+    app.use(express.static(effectiveDistPath));
+    app.use((req, res, next) => {
+      try {
+        const cleanPath = req.path.replace(/^\/+/, '');
+        const assetPath = path.resolve(effectiveDistPath, cleanPath);
+        if (assetPath.startsWith(path.resolve(effectiveDistPath)) && fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
+          const ext = path.extname(assetPath).toLowerCase();
+          const mimeTypes: Record<string, string> = {
+            '.html': 'text/html; charset=utf-8',
+            '.js': 'text/javascript; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.svg': 'image/svg+xml',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.ico': 'image/x-icon',
+            '.json': 'application/json; charset=utf-8',
+            '.wasm': 'application/wasm',
+            '.tflite': 'application/octet-stream',
+            '.task': 'application/octet-stream',
+          };
+          res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+          return res.send(fs.readFileSync(assetPath));
+        }
+      } catch {}
+      next();
+    });
+    app.get('*', (_req, res) => {
+      if (fs.existsSync(distHtmlPath)) {
+        try {
+          const html = fs.readFileSync(distHtmlPath, 'utf-8');
+          res.setHeader('Content-Type', 'text/html; charset=utf-8');
+          return res.send(html);
+        } catch {
+          return res.sendFile(distHtmlPath);
+        }
+      } else {
+        res.status(404).send('IRIS static build not found at: ' + distHtmlPath);
+      }
+    });
+  } else {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
@@ -2705,7 +3191,7 @@ async function startServer() {
     app.use('*', async (req, res, next) => {
       try {
         const url = req.originalUrl;
-        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        let template = fs.readFileSync(path.resolve(appDir, 'index.html'), 'utf-8');
         template = await vite.transformIndexHtml(url, template);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
       } catch (e) {
@@ -2713,19 +3199,77 @@ async function startServer() {
         next(e);
       }
     });
-  } else {
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
-    });
   }
 
-  server.listen(port, '0.0.0.0', () => {
-    console.log(`Iris AI server running on http://0.0.0.0:${port}`);
+  const findAvailablePort = async (startPort: number, maxTries = 10): Promise<number> => {
+    for (let p = startPort; p < startPort + maxTries; p++) {
+      const isFree = await new Promise<boolean>((resolve) => {
+        const tester = http.createServer();
+        tester.once('error', () => resolve(false));
+        tester.once('listening', () => {
+          tester.close(() => resolve(true));
+        });
+        tester.listen(p, '0.0.0.0');
+      });
+      if (isFree) return p;
+    }
+    return startPort;
+  };
+
+  const actualPort = await findAvailablePort(options?.port || port || 3000);
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', (err) => {
+      console.error(`[Iris Server] Failed to listen on 0.0.0.0:${actualPort}:`, err);
+      reject(err);
+    });
+    server.listen(actualPort, '0.0.0.0', () => {
+      console.log(`Iris AI server running on http://0.0.0.0:${actualPort} (accessible via localhost & 127.0.0.1)`);
+      resolve();
+    });
+  });
+
+  activeServerInstance = {
+    server,
+    app,
+    wss: liveWss,
+    db,
+    port: actualPort,
+    close: async () => {
+      await stopServer();
+    },
+  };
+
+  return activeServerInstance;
+}
+
+export async function stopServer(): Promise<void> {
+  if (!activeServerInstance) return;
+  const instance = activeServerInstance;
+  activeServerInstance = null;
+
+  return new Promise<void>((resolve, reject) => {
+    instance.wss.close(() => {
+      instance.server.close((err) => {
+        instance.db.close();
+        if (err) reject(err);
+        else resolve();
+      });
+    });
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+// Auto-run if executed as main CLI or tsx process
+const isMainScript =
+  Boolean(process.argv[1]) &&
+  (process.argv[1].endsWith('server.ts') ||
+    process.argv[1].endsWith('server.js') ||
+    process.argv[1].endsWith('server.cjs') ||
+    process.argv[1].includes('tsx'));
+
+if (isMainScript && !activeServerInstance) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}

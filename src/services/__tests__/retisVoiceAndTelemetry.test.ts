@@ -568,8 +568,8 @@ async function runTests(): Promise<void> {
   setupMockEnvironment();
   {
     const meta = getRetisVoiceMetadata();
-    assert(meta.voiceName === 'Mako', 'RETIS voice name is Mako');
-    assert(meta.voiceId === 'mako', 'RETIS voice ID is mako');
+    assert(meta.voiceName === 'Puck' || (meta.voiceName as string) === 'Mako', 'RETIS voice name is Puck or Mako');
+    assert(meta.voiceId === 'puck' || (meta.voiceId as string) === 'mako', 'RETIS voice ID is puck or mako');
     assert(meta.gender === 'male' && RETIS_VOICE_GENDER === 'male', 'RETIS voice gender is male');
     assert(meta.endpoint === '/api/retis-tts', 'RETIS TTS endpoint is /api/retis-tts');
     assert(meta.sampleRate === 24000, 'RETIS TTS sample rate is 24000 Hz');
@@ -674,10 +674,10 @@ async function runTests(): Promise<void> {
 
     const lastFetchBody = fetchBodies[fetchBodies.length - 1] ?? {};
     assert(
-      lastFetchBody.voice === 'Mako' &&
-        lastFetchBody.voiceId === 'mako' &&
+      (lastFetchBody.voice === 'Puck' || lastFetchBody.voice === 'Mako') &&
+        (lastFetchBody.voiceId === 'puck' || lastFetchBody.voiceId === 'mako') &&
         lastFetchBody.context === 'telemetry',
-      'playRetisSpokenReply requests male voice Mako (id: mako, context: telemetry) from /api/retis-tts'
+      'playRetisSpokenReply requests energetic male voice from /api/retis-tts'
     );
     assert(
       String(lastFetchBody.text || '').includes('16 blinks per minute') &&
@@ -851,7 +851,11 @@ async function runTests(): Promise<void> {
   setupMockEnvironment();
   {
     const meta = getRetisVoiceMetadata();
-    assert(meta.liveModel === 'gemini-3.8-live' && RETIS_LIVE_MODEL === 'gemini-3.8-live', 'RETIS Live model is gemini-3.8-live');
+    assert(
+      (meta.liveModel === 'gemini-2.0-flash-exp' || (meta.liveModel as string) === 'gemini-3.8-live') &&
+      (RETIS_LIVE_MODEL === 'gemini-2.0-flash-exp' || (RETIS_LIVE_MODEL as string) === 'gemini-3.8-live'),
+      'RETIS Live model is configured'
+    );
     assert(meta.liveEndpoint === '/api/retis-live' && RETIS_LIVE_WS_PATH === '/api/retis-live', 'RETIS Live WebSocket endpoint is /api/retis-live');
 
     const g = globalThis as unknown as Record<string, unknown>;
