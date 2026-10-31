@@ -1,4 +1,25 @@
 {
-  "projectName": "<insert the repo's name>",
-  "projectOwner": "<insert the repo's owner/orgs>"
+  "projectName": "Iris-AI",
+  "projectOwner": "AlvinGPT",
+  "files": [
+    "README.md"
+  ],
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributorsPerLine": 7,
+  "contributors": [
+    {
+      "login": "AlvinGPT",
+      "name": "AlvinGPT.exe",
+      "avatar_url": "https://avatars.githubusercontent.com/u/177337501?v=4",
+      "profile": "https://github.com/AlvinGPT",
+      "contributions": [
+        "code",
+        "bug",
+        "design",
+        "ideas",
+        "test"
+      ]
+    }
+  ]
 }
