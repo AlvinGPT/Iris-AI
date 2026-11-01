@@ -16,7 +16,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist dist-server dist-electron release server.js",
     "lint": "tsc --noEmit",
-    "dist:win": "npm run build && npm run build:server && npm run build:electron && electron-builder --win dir nsis"
+    "dist:win": "npm run build && npm run build:server && npm run build:electron && electron-builder --win dir nsis && powershell -NoProfile -Command \"if (Test-Path release/win-unpacked) { icacls release\\win-unpacked /grant *S-1-15-2-1:(OI)(CI)(RX) /T }\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

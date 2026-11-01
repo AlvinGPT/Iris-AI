@@ -1,0 +1,3 @@
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+[14692:1030/233002.630:FATAL:electron\shell\browser\win\install_dir_access.cc:52] Sandboxed processes cannot read C:\Users\figos\Downloads\Iris\release\win-unpacked: its ACL has an entry for an AppContainer package SID but none for ALL APPLICATION PACKAGES, so Windows denies the sandbox token access. Grant it with: icacls "C:\Users\figos\Downloads\Iris\release\win-unpacked" /grant *S-1-15-2-1:(OI)(CI)(RX)

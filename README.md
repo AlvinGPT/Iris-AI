@@ -96,25 +96,14 @@ IRIS is fully compatible with Linux operating systems using **Wine**:
 
 ---
 
-## Contributors
+## 👥 Developers
 
-<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table>
-  <tbody>
-    <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AlvinGPT"><img src="https://avatars.githubusercontent.com/u/177337501?v=4?s=100" width="100px;" alt="AlvinGPT.exe"/><br /><sub><b>AlvinGPT.exe</b></sub></a><br /><a href="#code-AlvinGPT" title="Code">💻</a> <a href="#bug-AlvinGPT" title="Bug reports">🐛</a> <a href="#design-AlvinGPT" title="Design">🎨</a> <a href="#ideas-AlvinGPT" title="Ideas, Planning, & Feedback">🤔</a> <a href="#test-AlvinGPT" title="Tests">⚠️</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/figosuresh"><img src="https://avatars.githubusercontent.com/u/266002334?v=4?s=100" width="100px;" alt="figosuresh"/><br /><sub><b>figosuresh</b></sub></a><br /><a href="#code-figosuresh" title="Code">💻</a> <a href="#bug-figosuresh" title="Bug reports">🐛</a> <a href="#design-figosuresh" title="Design">🎨</a> <a href="#ideas-figosuresh" title="Ideas, Planning, & Feedback">🤔</a> <a href="#test-figosuresh" title="Tests">⚠️</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/blessonvt"><img src="https://avatars.githubusercontent.com/u/250171395?v=4?s=100" width="100px;" alt="blessonvt"/><br /><sub><b>blessonvt</b></sub></a><br /><a href="#doc-blessonvt" title="Documentation">📖</a> <a href="#content-blessonvt" title="Content">🖋</a></td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-
-<!-- ALL-CONTRIBUTORS-LIST:END -->
+Developed by **Sharjah Indian School, Juwaiza** (Class 11):
+- **Alvin**
+- **Devak**
+- **Figo**
+- **Jeremi**
+- **Blesson**
 
 ---
 

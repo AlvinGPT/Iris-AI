@@ -1,0 +1,142 @@
+[2026-10-30T19:46:31.974Z] app.whenReady() reached.
+[2026-10-30T19:46:32.244Z] Loading packaged UI from local file: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist\index.html
+[2026-10-30T19:46:46.408Z] mainWindow shown and focused immediately.
+[2026-10-30T19:46:46.530Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-10-30T19:46:47.425Z] Express server daemon active on port 3000
+[2026-10-30T19:46:47.695Z] Navigating window to live daemon: http://127.0.0.1:3000
+[2026-10-31T18:56:39.812Z] app.whenReady() reached.
+[2026-10-31T18:56:39.970Z] System tray created and event listeners attached.
+[2026-10-31T18:56:39.972Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-10-31T19:32:54.429Z] app.whenReady() reached.
+[2026-10-31T19:32:54.863Z] System tray created and event listeners attached.
+[2026-10-31T19:32:54.997Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-10-31T19:32:56.378Z] Express server daemon active on port 3000
+[2026-10-31T19:32:56.933Z] Server readiness check on port 3000: READY
+[2026-10-31T19:32:56.996Z] Loading application directly from live daemon: http://localhost:3000
+[2026-10-31T19:33:03.158Z] mainWindow shown and focused cleanly on normal launch.
+[2026-10-31T19:33:03.312Z] mainWindow ready-to-show: displayed and focused.
+[2026-10-31T19:38:25.090Z] app.whenReady() reached.
+[2026-10-31T19:38:25.144Z] System tray created and event listeners attached.
+[2026-10-31T19:38:25.147Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-10-31T19:38:25.205Z] Express server daemon active on port 3000
+[2026-10-31T19:38:25.264Z] Server readiness check on port 3000: READY
+[2026-10-31T19:38:25.305Z] Loading application directly from live daemon: http://localhost:3000
+[2026-10-31T19:38:25.812Z] mainWindow shown and focused cleanly on normal launch.
+[2026-10-31T19:38:25.844Z] mainWindow ready-to-show: displayed and focused.
+[2026-10-31T19:38:26.415Z] widgetWindow initialized and shown.
+[2026-10-31T19:38:27.086Z] edgeOverlayWindow initialized and shown.
+[2026-11-01T03:58:02.497Z] app.whenReady() reached.
+[2026-11-01T03:58:02.565Z] System tray created and event listeners attached.
+[2026-11-01T03:58:02.568Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T03:58:02.627Z] Express server daemon active on port 3000
+[2026-11-01T03:58:02.813Z] Server readiness check on port 3000: READY
+[2026-11-01T03:58:02.880Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T03:58:03.424Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T03:58:03.469Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T03:58:04.389Z] widgetWindow initialized and shown.
+[2026-11-01T03:58:05.264Z] edgeOverlayWindow initialized and shown.
+[2026-11-01T04:20:10.920Z] app.whenReady() reached.
+[2026-11-01T04:20:10.971Z] System tray created and event listeners attached.
+[2026-11-01T04:20:10.972Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T04:20:11.032Z] Express server daemon active on port 3000
+[2026-11-01T04:20:11.082Z] Server readiness check on port 3000: READY
+[2026-11-01T04:20:11.127Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T04:20:12.215Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T04:20:12.269Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T04:51:57.803Z] app.whenReady() reached.
+[2026-11-01T04:51:57.882Z] System tray created and event listeners attached.
+[2026-11-01T04:51:57.884Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T04:51:57.963Z] Express server daemon active on port 3000
+[2026-11-01T04:51:59.739Z] Server readiness check on port 3000: READY
+[2026-11-01T07:30:35.282Z] app.whenReady() reached.
+[2026-11-01T07:30:35.381Z] System tray created and event listeners attached.
+[2026-11-01T07:30:35.383Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T07:30:35.444Z] Express server daemon active on port 3000
+[2026-11-01T07:30:35.549Z] Server readiness check on port 3000: READY
+[2026-11-01T07:30:35.619Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T07:30:36.378Z] mainWindow initializing GPU video decoding pipeline for silent boot daemon mode (--hidden)...
+[2026-11-01T07:30:36.829Z] mainWindow primed GPU video decode and returned to hidden tray mode.
+[2026-11-01T07:30:37.607Z] widgetWindow initialized and shown.
+[2026-11-01T08:18:04.566Z] app.whenReady() reached.
+[2026-11-01T08:18:04.706Z] System tray created and event listeners attached.
+[2026-11-01T08:18:04.712Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\dist, db: C:\Users\figos\AppData\Roaming\Electron\iris_telemetry.db)...
+[2026-11-01T08:18:04.866Z] Express server daemon active on port 3000
+[2026-11-01T08:18:05.339Z] Server readiness check on port 3000: READY
+[2026-11-01T08:18:06.815Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T08:18:08.048Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T08:18:08.055Z] mainWindow forced visible and focused in app.whenReady().
+[2026-11-01T08:18:08.114Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T08:18:09.235Z] widgetWindow initialized and shown as full-workArea transparent canvas.
+[2026-11-01T08:18:10.645Z] edgeOverlayWindow initialized and shown.
+[2026-11-01T08:20:32.152Z] app.whenReady() reached.
+[2026-11-01T08:20:32.242Z] System tray created and event listeners attached.
+[2026-11-01T08:20:32.250Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T08:20:32.340Z] Express server daemon active on port 3000
+[2026-11-01T08:20:32.432Z] Server readiness check on port 3000: READY
+[2026-11-01T08:20:32.514Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T08:20:34.375Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T08:20:34.392Z] mainWindow forced visible and focused in app.whenReady().
+[2026-11-01T08:20:34.441Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T08:20:59.594Z] app.whenReady() reached.
+[2026-11-01T08:20:59.674Z] System tray created and event listeners attached.
+[2026-11-01T08:20:59.676Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T08:20:59.730Z] Express server daemon active on port 3000
+[2026-11-01T08:20:59.783Z] Server readiness check on port 3000: READY
+[2026-11-01T08:20:59.839Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T08:21:00.707Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T08:21:00.744Z] mainWindow forced visible and focused in app.whenReady().
+[2026-11-01T08:21:00.859Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T08:21:02.794Z] widgetWindow initialized and shown as full-workArea transparent canvas.
+[2026-11-01T08:22:05.567Z] app.whenReady() reached.
+[2026-11-01T08:22:05.648Z] System tray created and event listeners attached.
+[2026-11-01T08:22:05.652Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T08:22:05.744Z] Express server daemon active on port 3000
+[2026-11-01T08:22:05.936Z] Server readiness check on port 3000: READY
+[2026-11-01T08:22:06.019Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T08:22:07.504Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T08:22:07.512Z] mainWindow forced visible and focused in app.whenReady().
+[2026-11-01T08:22:07.619Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T08:22:09.703Z] widgetWindow initialized and shown as full-workArea transparent canvas.
+[2026-11-01T08:22:11.250Z] edgeOverlayWindow initialized and shown.
+[2026-11-01T08:22:25.159Z] app.whenReady() reached.
+[2026-11-01T08:22:25.296Z] System tray created and event listeners attached.
+[2026-11-01T08:22:25.300Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T08:22:25.423Z] Express server daemon active on port 3000
+[2026-11-01T08:22:26.571Z] Server readiness check on port 3000: READY
+[2026-11-01T08:22:26.667Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T08:22:29.237Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T08:23:20.035Z] app.whenReady() reached.
+[2026-11-01T08:23:20.111Z] System tray created and event listeners attached.
+[2026-11-01T08:23:20.113Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T08:23:20.169Z] Express server daemon active on port 3000
+[2026-11-01T08:23:20.281Z] Server readiness check on port 3000: READY
+[2026-11-01T08:23:20.364Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T08:23:21.363Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T08:23:21.396Z] mainWindow forced visible and focused in app.whenReady().
+[2026-11-01T08:23:21.491Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T08:23:23.132Z] widgetWindow initialized and shown as full-workArea transparent canvas.
+[2026-11-01T08:23:24.123Z] edgeOverlayWindow initialized and shown.
+[2026-11-01T08:23:54.377Z] app.whenReady() reached.
+[2026-11-01T08:23:54.434Z] System tray created and event listeners attached.
+[2026-11-01T08:23:54.435Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T08:23:54.507Z] Express server daemon active on port 3000
+[2026-11-01T08:23:54.585Z] Server readiness check on port 3000: READY
+[2026-11-01T08:23:54.646Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T08:23:55.538Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T08:23:55.563Z] mainWindow forced visible and focused in app.whenReady().
+[2026-11-01T08:23:55.590Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T08:23:56.811Z] widgetWindow initialized and shown as full-workArea transparent canvas.
+[2026-11-01T08:23:57.874Z] edgeOverlayWindow initialized and shown.
+[2026-11-01T08:24:00.911Z] Second instance launch signal received. Restoring, showing, and focusing main window.
+[2026-11-01T08:24:00.916Z] Another instance of IRIS already holds the lock. Quitting duplicate instance.
+[2026-11-01T08:52:57.371Z] app.whenReady() reached.
+[2026-11-01T08:52:57.443Z] System tray created and event listeners attached.
+[2026-11-01T08:52:57.445Z] Initializing Express daemon (dist: C:\Users\figos\Downloads\Iris\release\win-unpacked\resources\app.asar\dist, db: C:\Users\figos\AppData\Roaming\iris-ai-studio\iris_telemetry.db)...
+[2026-11-01T08:52:57.526Z] Express server daemon active on port 3000
+[2026-11-01T08:52:57.589Z] Server readiness check on port 3000: READY
+[2026-11-01T08:52:57.646Z] Loading application directly from live daemon: http://localhost:3000
+[2026-11-01T08:52:58.962Z] mainWindow shown and focused cleanly on normal launch.
+[2026-11-01T08:52:58.966Z] mainWindow forced visible and focused in app.whenReady().
+[2026-11-01T08:52:58.997Z] mainWindow ready-to-show: displayed and focused.
+[2026-11-01T08:53:00.437Z] widgetWindow initialized and shown as full-workArea transparent canvas.
+[2026-11-01T08:53:01.894Z] edgeOverlayWindow initialized and shown.

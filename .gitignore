@@ -1,7 +1,6 @@
 node_modules/
 build/
 dist/
-release/win-unpacked/
 coverage/
 .DS_Store
 *.log

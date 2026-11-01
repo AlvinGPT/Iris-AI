@@ -1,0 +1,3 @@
+
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
+[10588:1030/233052.618:ERROR:chrome\browser\process_singleton_win.cc:316] Lock file can not be created: The process cannot access the file because it is being used by another process. (0x20)
