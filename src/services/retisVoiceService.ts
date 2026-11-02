@@ -1940,6 +1940,40 @@ function pcm16ToWebAudioBuffer(
   return buffer;
 }
 
+async function decodeAudioBytesToBuffer(
+  ctx: AudioContext,
+  rawBytes: Uint8Array,
+  sampleRate = 24000
+): Promise<AudioBuffer | null> {
+  const isWav =
+    rawBytes.length >= 44 &&
+    rawBytes[0] === 0x52 &&
+    rawBytes[1] === 0x49 &&
+    rawBytes[2] === 0x46 &&
+    rawBytes[3] === 0x46 &&
+    rawBytes[8] === 0x57 &&
+    rawBytes[9] === 0x41 &&
+    rawBytes[10] === 0x56 &&
+    rawBytes[11] === 0x45;
+
+  if (isWav || typeof ctx.decodeAudioData !== 'function') {
+    const pcmBytes = stripWavHeaderIfPresent(rawBytes);
+    return pcm16ToWebAudioBuffer(ctx, pcmBytes, sampleRate);
+  }
+
+  try {
+    const copy = new Uint8Array(rawBytes.byteLength);
+    copy.set(rawBytes);
+    const decoded = await ctx.decodeAudioData(copy.buffer as ArrayBuffer);
+    if (decoded) return decoded;
+  } catch {
+    // Fallback to PCM16
+  }
+
+  const pcmBytes = stripWavHeaderIfPresent(rawBytes);
+  return pcm16ToWebAudioBuffer(ctx, pcmBytes, sampleRate);
+}
+
 /**
  * Creates or resumes the shared RETIS playback AudioContext synchronously inside a user click gesture
  * so that subsequent asynchronous TTS buffers can play without browser autoplay policy blocks.
@@ -2455,8 +2489,7 @@ export function playRetisSpokenReply(
         const data = await res.json().catch(() => ({}));
         if (!data?.fallback && typeof data?.audioBase64 === 'string' && data.audioBase64) {
           const rawBytes = decodeBase64ToBytes(data.audioBase64);
-          const pcmBytes = stripWavHeaderIfPresent(rawBytes);
-          const decoded = pcm16ToWebAudioBuffer(ctx, pcmBytes, data.sampleRate || 24000);
+          const decoded = await decodeAudioBytesToBuffer(ctx, rawBytes, data.sampleRate || 24000);
           if (decoded) {
             retisAudioBufferCache.set(cacheKey, decoded);
             return decoded;
@@ -2972,8 +3005,22 @@ export function streamRetisChatAndVoice(
 
             if (b64 && activeRetisAudioCtx) {
               const rawBytes = decodeBase64ToBytes(b64);
-              const pcmBytes = stripWavHeaderIfPresent(rawBytes);
-              item.audioBuffer = pcm16ToWebAudioBuffer(activeRetisAudioCtx, pcmBytes, sampleRate);
+              const isWav =
+                rawBytes.length >= 44 &&
+                rawBytes[0] === 0x52 &&
+                rawBytes[1] === 0x49 &&
+                rawBytes[2] === 0x46 &&
+                rawBytes[3] === 0x46 &&
+                rawBytes[8] === 0x57 &&
+                rawBytes[9] === 0x41 &&
+                rawBytes[10] === 0x56 &&
+                rawBytes[11] === 0x45;
+              if (isWav || typeof activeRetisAudioCtx.decodeAudioData !== 'function') {
+                const pcmBytes = stripWavHeaderIfPresent(rawBytes);
+                item.audioBuffer = pcm16ToWebAudioBuffer(activeRetisAudioCtx, pcmBytes, sampleRate);
+              } else {
+                item.audioBuffer = await decodeAudioBytesToBuffer(activeRetisAudioCtx, rawBytes, sampleRate);
+              }
             }
             item.audioReady = true;
             void pumpQueue();

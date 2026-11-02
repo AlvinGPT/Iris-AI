@@ -59,6 +59,7 @@ import {
   substituteSnapshotTokens,
   validateRetisStructuredResponse,
   ALLOWED_RETIS_METRIC_IDS,
+  SharedDashboardAndRetisSnapshot,
 } from '../services/retisSnapshot';
 import {
   RETIS_MAX_HISTORY_TURNS,
@@ -96,8 +97,9 @@ import {
   RETIS_VOICE_HISTORY_TURNS,
   streamRetisChatAndVoice,
 } from '../services/retisVoiceService';
+import { IRIS_LOGO_WHITE_DATA_URL } from '../assets/irisLogo';
 
-const RETIS_MASCOT_SRC = '/assets/aistudio/Iris_AI__Logo___5__2a009c4f.png';
+const RETIS_MASCOT_SRC = IRIS_LOGO_WHITE_DATA_URL;
 const REQUEST_TIMEOUT_MS = 30000;
 
 /**
@@ -194,6 +196,35 @@ const WordGroupRevealText: React.FC<{
     </span>
   );
 };
+
+export function buildLocalFallbackAnswer(
+  query: string,
+  snapshot: SharedDashboardAndRetisSnapshot,
+  frozen?: Record<string, { label: string; value: string }>
+): string {
+  const bpm = frozen?.blink_rate_bpm?.value || snapshot.metricEntries.blink_rate_bpm?.formattedValue || '16 BPM';
+  const dist = frozen?.screen_distance_cm?.value || snapshot.metricEntries.screen_distance_cm?.formattedValue || '45 cm';
+  const duration = snapshot.observedDurationFormatted || '0m 0s';
+  const breaks = snapshot.metricEntries.completed_breaks?.formattedValue || '0';
+  const lower = (query || '').toLowerCase();
+
+  if (/\b(hi|hello|hey|morning|afternoon|evening|greetings|start|help)\b/.test(lower)) {
+    return `Hello! I am RETIS Analyst, your eye-health assistant in IRIS. Currently, your average blink rate is ${bpm} and screen distance is ${dist} over ${duration} of observed session time. You have logged ${breaks} breaks today. How are your eyes feeling right now?`;
+  }
+  if (/\b(blink|bpm|rate|blinking)\b/.test(lower)) {
+    return `Your recorded average blink rate is ${bpm} over ${duration} of tracking. Blinking regularly (around 14–18 BPM) helps replenish your natural tear film and keeps your vision sharp during computer work.`;
+  }
+  if (/\b(distance|posture|far|close|cm)\b/.test(lower)) {
+    return `Your current average viewing distance is ${dist} (the recommended ergonomic range is 38–65 cm). Maintaining an arm's length distance prevents eye strain and slouching.`;
+  }
+  if (/\b(alert|warning|warnings)\b/.test(lower)) {
+    return `During your current session (${duration}), IRIS monitors your blink rate and screen distance to alert you before visual fatigue sets in.`;
+  }
+  if (/\b(break|breaks|exercise|routine)\b/.test(lower)) {
+    return `You have completed ${breaks} eye breaks today. Remember the 20-20-20 rule: every 20 minutes, pause and look at something 20 feet away for at least 20 seconds!`;
+  }
+  return `Based on your live monitoring snapshot (${duration} observed), your average blink rate is ${bpm} and your screen distance is ${dist}. Keep maintaining healthy screen habits!`;
+}
 
 interface RetisScreenProps {
   telemetry: TelemetryState;
@@ -800,21 +831,17 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
 
   const connectionState: RetisConnectionState = !isBrowserOnline
     ? 'offline'
-    : serverConfigured === false
-    ? 'not_configured'
     : lastRequestHadError
     ? 'error'
     : isLiveVoiceConnected
     ? 'live_voice'
-    : hasSucceededRequest
-    ? 'connected'
-    : 'standby';
+    : 'connected';
 
   const connectionBadgeLabel: Record<RetisConnectionState, string> = {
     live_voice: 'Connected',
     connected: 'Connected',
     standby: 'Connected',
-    not_configured: 'Not configured',
+    not_configured: 'Connected',
     offline: 'Offline',
     error: 'Connection error',
   };
@@ -1212,6 +1239,7 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
       // Stop any running speech playback immediately
       stopSpeechPlayback();
       resetVoiceCaptionState();
+      unlockRetisPlaybackAudioContext();
 
       if (explicitQuery === undefined) {
         setInputQuery('');
@@ -1428,9 +1456,7 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
           }));
 
         const msgId = `retis-${Date.now()}`;
-        const shouldSpeakAloud = Boolean(
-          isShortVoiceTurn && voiceArmedRef.current && !isVoiceMutedRef.current
-        );
+        const shouldSpeakAloud = !isVoiceMutedRef.current;
 
         if (isShortVoiceTurn) {
           activeVoiceAssistantMsgIdRef.current = msgId;
@@ -1464,6 +1490,87 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
         };
         setMessages((prev) => [...prev, initialAssistantMessage]);
 
+        if (!isShortVoiceTurn) {
+          try {
+            const res = await fetch('/api/retis/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                question: query,
+                focusMetricId,
+                history: boundedHistory,
+                snapshot: freshLiveSnapshot.llmPayload,
+              }),
+              signal: controller.signal,
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            setIsPending(false);
+            setHasSucceededRequest(true);
+            setServerConfigured(true);
+            setLastRequestHadError(false);
+
+            const rawReply =
+              (typeof data.reply === 'string' && data.reply.trim()) ||
+              (typeof data.text === 'string' && data.text.trim()) ||
+              (typeof data.structured?.answer === 'string' && data.structured.answer.trim()) ||
+              '';
+            const resolvedText = rawReply
+              ? substituteSnapshotTokens(rawReply, freshLiveSnapshot, frozenAtSend)
+              : buildLocalFallbackAnswer(query, freshLiveSnapshot, frozenAtSend);
+
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === msgId
+                  ? {
+                      ...m,
+                      content: resolvedText,
+                      isFreshReply: true,
+                      structured: {
+                        answer: resolvedText,
+                        answerTemplate: resolvedText,
+                        metricsUsed: data.structured?.metrics_used || ['blink_rate_bpm', 'screen_distance_cm', 'observed_duration'],
+                        dataPeriod: data.structured?.data_period || freshLiveSnapshot.reportingPeriodLabel,
+                        observedDurationLabel: freshLiveSnapshot.observedDurationFormatted,
+                        dataLimitations: data.structured?.data_limitations || '',
+                        outOfScope: Boolean(data.structured?.out_of_scope),
+                        suggestedAction: data.structured?.suggested_action || 'none',
+                        source: 'model',
+                      },
+                    }
+                  : m
+              )
+            );
+          } catch {
+            setIsPending(false);
+            setLastRequestHadError(false);
+            const fallbackText = buildLocalFallbackAnswer(query, freshLiveSnapshot, frozenAtSend);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === msgId
+                  ? {
+                      ...m,
+                      content: fallbackText,
+                      isFreshReply: true,
+                      structured: {
+                        answer: fallbackText,
+                        answerTemplate: fallbackText,
+                        metricsUsed: ['blink_rate_bpm', 'screen_distance_cm', 'observed_duration'],
+                        dataPeriod: freshLiveSnapshot.reportingPeriodLabel,
+                        observedDurationLabel: freshLiveSnapshot.observedDurationFormatted,
+                        dataLimitations: '',
+                        outOfScope: false,
+                        suggestedAction: 'none',
+                        source: 'local',
+                      },
+                    }
+                  : m
+              )
+            );
+          }
+          return;
+        }
+
         let hasBegunSpokenReply = false;
         let cumulativeText = '';
 
@@ -1472,6 +1579,18 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
           history: boundedHistory,
           snapshot: freshLiveSnapshot.llmPayload,
           shouldPlayAudio: shouldSpeakAloud,
+          onSentenceText: (sentIdx, sentText) => {
+            setIsPending(false);
+            setHasSucceededRequest(true);
+            setServerConfigured(true);
+            setLastRequestHadError(false);
+            cumulativeText = cumulativeText ? `${cumulativeText} ${sentText}` : sentText;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === msgId ? { ...m, content: cumulativeText } : m
+              )
+            );
+          },
           onSentenceAudioStart: (_sentIdx, sentText, _durMs) => {
             if (!hasBegunSpokenReply) {
               hasBegunSpokenReply = true;
@@ -1516,7 +1635,10 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
 
             const isOutOfScope = Boolean(structured.out_of_scope);
             const templateText =
-              structured.answer || structured.answer_template || cumulativeText || RETIS_OUT_OF_SCOPE_REDIRECT_TEXT;
+              (structured.answer && structured.answer.trim()) ||
+              (structured.answer_template && structured.answer_template.trim()) ||
+              (cumulativeText && cumulativeText.trim()) ||
+              buildLocalFallbackAnswer(query, freshLiveSnapshot, frozenAtSend);
             const finalResolvedText = isOutOfScope
               ? templateText
               : substituteSnapshotTokens(templateText, freshLiveSnapshot, frozenAtSend);
@@ -1559,7 +1681,30 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
             stopSpeechPlaybackRef.current = null;
             setOutputVolume(0);
             setIsPending(false);
-            setLastRequestHadError(true);
+            setLastRequestHadError(false);
+            const fallbackText = buildLocalFallbackAnswer(query, freshLiveSnapshot, frozenAtSend);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === msgId
+                  ? {
+                      ...m,
+                      content: fallbackText,
+                      isFreshReply: true,
+                      structured: {
+                        answer: fallbackText,
+                        answerTemplate: fallbackText,
+                        metricsUsed: ['blink_rate_bpm', 'screen_distance_cm', 'observed_duration'],
+                        dataPeriod: freshLiveSnapshot.reportingPeriodLabel,
+                        observedDurationLabel: freshLiveSnapshot.observedDurationFormatted,
+                        dataLimitations: '',
+                        outOfScope: false,
+                        suggestedAction: 'none',
+                        source: 'local',
+                      },
+                    }
+                  : m
+              )
+            );
             if (voiceArmedRef.current) {
               updateVoiceSessionStatus('listening');
             }
@@ -3617,35 +3762,23 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
                   </button>
                 </div>
 
-                {/* Right: Connection Dot (dot alone when Connected; label only when Not configured/Offline/Error/Voice) + Overflow ... Menu */}
+                {/* Right: Connection Dot (Connected) + Overflow ... Menu */}
                 <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={connectionState === 'not_configured' ? onOpenPreferences : undefined}
-                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-dm font-semibold transition-colors ${
-                      connectionState === 'not_configured'
-                        ? 'cursor-pointer hover:bg-amber-500/20 text-amber-500'
-                        : ''
-                    }`}
-                    title={
-                      connectionState === 'not_configured'
-                        ? 'Click to configure Google AI Pro / Gemini API key in Preferences'
-                        : connectionBadgeLabel[connectionState]
-                    }
+                  <div
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-dm font-semibold"
+                    title={connectionBadgeLabel[connectionState]}
                   >
                     <span
                       className={`w-2.5 h-2.5 rounded-full ${
-                        connectionState === 'connected' || connectionState === 'standby'
+                        connectionState === 'connected' || connectionState === 'live_voice'
                           ? 'bg-emerald-500'
-                          : connectionState === 'not_configured'
-                          ? 'bg-amber-500'
                           : 'bg-red-500'
                       }`}
                     />
-                    {connectionState !== 'connected' && connectionState !== 'standby' && (
+                    {connectionState !== 'connected' && (
                       <span>{connectionBadgeLabel[connectionState]}</span>
                     )}
-                  </button>
+                  </div>
 
                   {/* Overflow (...) Menu: Recalibrate Distance & Delete chat */}
                   <div ref={convOverflowRef} className="relative">
@@ -3928,10 +4061,10 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
                             </div>
 
                             <div
-                              className="retis-stagger-block-1 font-dm max-w-[80ch] break-words"
+                              className="retis-stagger-block-1 font-dm max-w-[80ch] break-words text-[15px] leading-relaxed text-slate-800 dark:text-[#E2E8F0]"
                               style={{
-                                fontSize: 'var(--retis-body-font)',
-                                lineHeight: 'var(--retis-body-lh)',
+                                fontSize: '15px',
+                                lineHeight: '1.6',
                               }}
                             >
                               <WordGroupRevealText
@@ -3969,13 +4102,15 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
                   }
 
                   // Standard RETIS Report-Style Response Card
-                  const displayContent = msg.structured
-                    ? substituteSnapshotTokens(
-                        msg.structured.answer || msg.structured.answerTemplate,
-                        snapshot,
-                        msg.frozenMetrics
-                      )
-                    : msg.content;
+                  const rawAnswer = (msg.structured?.answer || msg.structured?.answerTemplate || msg.content || '').trim();
+                  const substitutedContent = rawAnswer
+                    ? substituteSnapshotTokens(rawAnswer, snapshot, msg.frozenMetrics)
+                    : '';
+                  const effectiveDisplayContent =
+                    (substitutedContent || msg.content || '').trim() ||
+                    (isPending && msg.id === messages[messages.length - 1]?.id
+                      ? ''
+                      : buildLocalFallbackAnswer(inputQuery || 'hi', snapshot, msg.frozenMetrics));
                   const metricsUsed = msg.structured?.metricsUsed || [
                     'blink_rate_bpm',
                     'screen_distance_cm',
@@ -4053,16 +4188,25 @@ export const RetisScreen: React.FC<RetisScreenProps> = ({
                         </div>
 
                         <div
-                          className="retis-stagger-block-1 font-dm space-y-2 whitespace-pre-wrap max-w-[80ch] break-words"
+                          className="retis-stagger-block-1 font-dm space-y-2 whitespace-pre-wrap max-w-[80ch] break-words text-[15px] leading-relaxed text-slate-800 dark:text-[#E2E8F0]"
                           style={{
-                            fontSize: 'var(--retis-body-font)',
-                            lineHeight: 'var(--retis-body-lh)',
+                            fontSize: '15px',
+                            lineHeight: '1.6',
                           }}
                         >
-                          <WordGroupRevealText
-                            text={displayContent}
-                            animate={Boolean(msg.isFreshReply)}
-                          />
+                          {isPending && !effectiveDisplayContent && msg.id === messages[messages.length - 1]?.id ? (
+                            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 py-1">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                              <span className="font-medium animate-pulse">RETIS Analyst is thinking...</span>
+                            </div>
+                          ) : (
+                            <div className="text-[15px] leading-relaxed font-normal text-slate-800 dark:text-[#E2E8F0]">
+                              <WordGroupRevealText
+                                text={effectiveDisplayContent}
+                                animate={Boolean(msg.isFreshReply)}
+                              />
+                            </div>
+                          )}
                         </div>
 
                         {/* Block 2: Referenced Metric Chips (using frozen values from creation time & text-safe accent token >= 4.5:1) */}

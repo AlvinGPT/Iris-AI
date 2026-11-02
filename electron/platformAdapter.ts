@@ -94,8 +94,10 @@ export function configureChromiumSwitches(app?: any): PlatformConfig {
   addSwitch('--no-sandbox');
   addSwitch('--disable-gpu-sandbox');
 
-  // 2. Linux Driver Alternatives & Wine/Proton compatibility switches
-  if (isWineOrProton) {
+  // 2. Windows Native Shared Camera vs Linux Driver Alternatives & Wine/Proton compatibility switches
+  if (isWindowsNative) {
+    addSwitch('--disable-background-media-suspend');
+  } else if (isWineOrProton) {
     // Disable Windows Media Foundation video capture to force V4L2/DirectShow compatibility
     addSwitch(
       '--disable-features',

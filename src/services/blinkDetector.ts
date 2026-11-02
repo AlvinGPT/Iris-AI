@@ -52,6 +52,8 @@ export interface BlinkDetectorConfig {
   minInterBlinkIntervalMs: number;
   /** Minimum valid observed monitoring duration (seconds) before calculating average BPM */
   minObservationSecondsForBpm: number;
+  /** Glasses-optimized detection mode for users wearing spectacles (compensates for lens glare and frame occlusion) */
+  glassesMode?: boolean;
 }
 
 export const DEFAULT_BLINK_CONFIG: BlinkDetectorConfig = {
@@ -66,8 +68,9 @@ export const DEFAULT_BLINK_CONFIG: BlinkDetectorConfig = {
   minClosedFrames: 1,          // Supports quick 50-100ms natural blinks at 24-60 FPS
   minBlinkDurationMs: 35,      // Measured from onset (last open frame) to reopen frame: allows 50-100ms quick blinks
   maxBlinkDurationMs: 650,     // Rejects intentional prolonged eye closures (> 650ms)
-  minInterBlinkIntervalMs: 110,// Prevents bounce double-counts while allowing natural rapid double-blinks
+  minInterBlinkIntervalMs: 180,// Minimum debounce of 180ms between blinks to prevent duplicate counts from eyelid bounce
   minObservationSecondsForBpm: 5,
+  glassesMode: false,
 };
 
 export interface BlinkThresholdSnapshot {
@@ -226,6 +229,7 @@ export interface BlinkDetectionResult {
   lastBlinkTime: number | null;
   lastBlinkDurationMs?: number;
   lastBlinkType?: BlinkType;
+  isGlassesMode?: boolean;
   candidateLogs: BlinkCandidateLog[];
 }
 
@@ -280,6 +284,7 @@ export class BlinkDetector {
   private maxSingleEyeDropRatio = 0;
   private minPartnerEyeDropRatio = 0;
   private hasEnteredClosedPhase = false;
+  private hasBlendshapeClosureTrigger = false;
   private lastProcessedTimestamp = 0;
 
   // Authoritative blink event registry (single source of truth for session total, graph, and rate)
@@ -337,6 +342,31 @@ export class BlinkDetector {
 
   public getBaseline(): number {
     return this.baselineEAR;
+  }
+
+  public setGlassesMode(enabled: boolean): void {
+    this.config.glassesMode = enabled;
+    if (enabled) {
+      // Glasses-optimized thresholds: Compensate for lens glare & spectacles frame attenuation
+      this.config.closureThresholdRatio = 0.875; // 12.5% relative drop (reliably triggers closures behind lenses)
+      this.config.fullClosureRatio = 0.80;      // 20.0% relative drop classifies as Full blink
+      this.config.reopenThresholdRatio = 0.93;  // 7.0% below baseline for reopening hysteresis
+      this.config.closureScoreThreshold = 0.38; // Lowered from 0.48 to match lens-dampened blendshapes
+      this.config.reopenScoreThreshold = 0.22;
+      this.config.minBlinkDurationMs = 28;
+    } else {
+      // Standard thresholds
+      this.config.closureThresholdRatio = DEFAULT_BLINK_CONFIG.closureThresholdRatio;
+      this.config.fullClosureRatio = DEFAULT_BLINK_CONFIG.fullClosureRatio;
+      this.config.reopenThresholdRatio = DEFAULT_BLINK_CONFIG.reopenThresholdRatio;
+      this.config.closureScoreThreshold = DEFAULT_BLINK_CONFIG.closureScoreThreshold;
+      this.config.reopenScoreThreshold = DEFAULT_BLINK_CONFIG.reopenScoreThreshold;
+      this.config.minBlinkDurationMs = DEFAULT_BLINK_CONFIG.minBlinkDurationMs;
+    }
+  }
+
+  public isGlassesModeActive(): boolean {
+    return !!this.config.glassesMode;
   }
 
   public getCandidateLogs(): BlinkCandidateLog[] {
@@ -409,6 +439,7 @@ export class BlinkDetector {
     this.maxSingleEyeDropRatio = 0;
     this.minPartnerEyeDropRatio = 0;
     this.hasEnteredClosedPhase = false;
+    this.hasBlendshapeClosureTrigger = false;
   }
 
   /**
@@ -436,7 +467,8 @@ export class BlinkDetector {
     timestamp = performance.now(),
     blendshapes?: Record<string, number>,
     headPose = { yaw: 0, pitch: 0, roll: 0 },
-    validObservationSeconds = 0
+    validObservationSeconds = 0,
+    isChallengeActive = false
   ): BlinkDetectionResult {
     // Detect large frame gap (e.g. camera paused & resumed or tab backgrounded > 750ms)
     if (this.lastProcessedTimestamp > 0 && timestamp - this.lastProcessedTimestamp > 750) {
@@ -727,27 +759,31 @@ export class BlinkDetector {
       : 0;
 
     // Asymmetric natural blink support:
-    // Recognizes natural blinks where one eyelid closes by >= 15.5% and the partner eye
-    // either drops by >= 8% or is temporarily occluded/untracked.
+    // Recognizes natural blinks where one eyelid closes and the partner eye
+    // either drops or is temporarily occluded/untracked (glasses glare or angle).
+    const isGlasses = !!this.config.glassesMode;
+    const asymmetricThresholdMax = isGlasses ? 0.12 : 0.155;
+    const asymmetricThresholdMin = isGlasses ? 0.05 : 0.08;
+
     const maxEyeDrop = Math.max(leftDropRatio, rightDropRatio);
     const minEyeDrop =
       isLeftValid && isRightValid
         ? Math.min(leftDropRatio, rightDropRatio)
         : maxEyeDrop;
     const isAsymmetricNaturalBlink =
-      maxEyeDrop >= 0.155 && minEyeDrop >= 0.08;
+      maxEyeDrop >= asymmetricThresholdMax && minEyeDrop >= asymmetricThresholdMin;
 
     const blendshapeDelta = hasBlendshapes
       ? Math.max(0, blendshapeBlink - this.restingBlendshape)
       : 0;
 
-    // Fuse neural blendshape evidence when concordant with geometric EAR reduction (>= 9% drop)
+    // Fuse neural blendshape evidence when concordant with geometric EAR reduction (>= 9% drop or >= 7% with glasses)
     const hasConcordantBlendshape =
-      hasBlendshapes && blendshapeDelta >= 0.13 && earDropRatio >= 0.09;
+      hasBlendshapes && blendshapeDelta >= (isGlasses ? 0.09 : 0.13) && earDropRatio >= (isGlasses ? 0.07 : 0.09);
 
     const earClosureScore = Math.min(1.0, earDropRatio / (1 - this.config.fullClosureRatio));
     const eyeClosureScore = hasConcordantBlendshape
-      ? Math.min(1.0, Math.max(earClosureScore, blendshapeDelta * 1.35))
+      ? Math.min(1.0, Math.max(earClosureScore, blendshapeDelta * (isGlasses ? 1.45 : 1.35)))
       : earClosureScore;
 
     // Compute unified effectiveEAR used by both the state machine and the live oscilloscope graph
@@ -779,19 +815,43 @@ export class BlinkDetector {
     let isBlinkEvent = false;
     let committedEvent: ValidatedBlinkEvent | undefined;
 
+    // Neural Blendshape Closure Trigger (Condition A)
+    const blendshapeClosureThreshold = isGlasses
+      ? (isChallengeActive ? 0.25 : 0.30)
+      : (isChallengeActive ? 0.35 : 0.42);
+    const isBlendshapeClosed =
+      hasBlendshapes &&
+      ((blinkLeftScore !== undefined && blinkLeftScore > blendshapeClosureThreshold) ||
+       (blinkRightScore !== undefined && blinkRightScore > blendshapeClosureThreshold));
+
+    // Relative EAR Drop & Absolute Threshold (Condition B)
+    // Drops by >= 22% (or 16% in glasses mode) below baselineEAR
+    const earDropRatioThreshold = isGlasses ? 0.84 : 0.78;
+    const isRelativeEARDrop =
+      rawCombinedEAR < baselineEAR * earDropRatioThreshold ||
+      effectiveEAR < baselineEAR * earDropRatioThreshold ||
+      (baselineEAR >= (isGlasses ? 0.20 : 0.22) && (rawCombinedEAR < (isGlasses ? 0.27 : 0.25) || effectiveEAR < (isGlasses ? 0.27 : 0.25))) ||
+      (isChallengeActive && (rawCombinedEAR < baselineEAR * (isGlasses ? 0.86 : 0.82) || rawCombinedEAR < 0.26));
+
     const isBelowClosureThreshold =
       effectiveEAR <= closureThresholdEAR ||
       earDropRatio >= 1 - this.config.closureThresholdRatio ||
       isAsymmetricNaturalBlink ||
-      eyeClosureScore >= this.config.closureScoreThreshold;
+      eyeClosureScore >= this.config.closureScoreThreshold ||
+      isBlendshapeClosed ||
+      isRelativeEARDrop;
 
     const isBelowFullClosureThreshold =
       effectiveEAR <= fullClosureThresholdEAR ||
-      earDropRatio >= 1 - this.config.fullClosureRatio;
+      earDropRatio >= 1 - this.config.fullClosureRatio ||
+      (hasBlendshapes && ((blinkLeftScore ?? 0) > 0.65 || (blinkRightScore ?? 0) > 0.65));
 
-    // Reopen hysteresis condition: aperture must rise back up to reopenThresholdEAR
+    // Reopen hysteresis condition: aperture rises back up to >= baselineEAR * 0.85 or reopenThresholdEAR
+    const maxBlendshape = hasBlendshapes ? Math.max(blinkLeftScore ?? 0, blinkRightScore ?? 0) : 0;
     const isAboveReopenThreshold =
-      effectiveEAR >= reopenThresholdEAR && !isAsymmetricNaturalBlink;
+      (rawCombinedEAR >= baselineEAR * 0.85 || effectiveEAR >= reopenThresholdEAR) &&
+      !isAsymmetricNaturalBlink &&
+      (!hasBlendshapes || maxBlendshape < (isChallengeActive ? 0.28 : 0.32));
 
     // Track last steady open timestamp while in OPEN state so closure duration is measured
     // from actual downward onset rather than only the bottom valley frame.
@@ -807,6 +867,7 @@ export class BlinkDetector {
           this.isCalibrated = true;
           this.state = 'CLOSING';
           this.stateChangeTime = timestamp;
+          this.hasBlendshapeClosureTrigger = isBlendshapeClosed;
           const onsetTime =
             this.lastOpenFrameTimestamp > 0 && timestamp - this.lastOpenFrameTimestamp <= 110
               ? this.lastOpenFrameTimestamp
@@ -829,6 +890,7 @@ export class BlinkDetector {
         if (isBelowClosureThreshold) {
           this.state = isBelowFullClosureThreshold ? 'CLOSED' : 'CLOSING';
           this.stateChangeTime = timestamp;
+          this.hasBlendshapeClosureTrigger = isBlendshapeClosed;
           // Anchor closure start to the last open frame immediately before descent (bounded <= 110ms)
           const onsetTime =
             this.lastOpenFrameTimestamp > 0 && timestamp - this.lastOpenFrameTimestamp <= 110
@@ -851,6 +913,9 @@ export class BlinkDetector {
       case 'CLOSING':
       case 'PARTIALLY_CLOSED':
       case 'CLOSED': {
+        if (isBlendshapeClosed) {
+          this.hasBlendshapeClosureTrigger = true;
+        }
         // Update extremum values reached during this closure phase
         if (eyeClosureScore > this.maxClosureReached) {
           this.maxClosureReached = eyeClosureScore;
@@ -911,7 +976,7 @@ export class BlinkDetector {
         if (isAboveReopenThreshold) {
           this.state = 'REOPENING';
           this.stateChangeTime = timestamp;
-          const blinkResult = this.evaluateAndCommitBlink(timestamp, liveThresholds);
+          const blinkResult = this.evaluateAndCommitBlink(timestamp, liveThresholds, isChallengeActive);
           isBlinkEvent = blinkResult.isBlinkEvent;
           committedEvent = blinkResult.committedEvent;
           this.state = 'OPEN';
@@ -920,6 +985,7 @@ export class BlinkDetector {
           this.closingStartTime = 0;
           this.closedFrameCount = 0;
           this.hasEnteredClosedPhase = false;
+          this.hasBlendshapeClosureTrigger = false;
         }
         break;
       }
@@ -937,8 +1003,9 @@ export class BlinkDetector {
           this.state = 'PROLONGED_CLOSURE';
           this.stateChangeTime = timestamp;
           this.hasEnteredClosedPhase = false;
+          this.hasBlendshapeClosureTrigger = false;
         } else if (isAboveReopenThreshold) {
-          const blinkResult = this.evaluateAndCommitBlink(timestamp, liveThresholds);
+          const blinkResult = this.evaluateAndCommitBlink(timestamp, liveThresholds, isChallengeActive);
           isBlinkEvent = blinkResult.isBlinkEvent;
           committedEvent = blinkResult.committedEvent;
           this.state = 'OPEN';
@@ -947,6 +1014,7 @@ export class BlinkDetector {
           this.closingStartTime = 0;
           this.closedFrameCount = 0;
           this.hasEnteredClosedPhase = false;
+          this.hasBlendshapeClosureTrigger = false;
         } else if (isBelowClosureThreshold) {
           // Dipped back below closure threshold before fully reopening -> stay in single closure
           this.state = isBelowFullClosureThreshold ? 'CLOSED' : 'PARTIALLY_CLOSED';
@@ -1001,6 +1069,7 @@ export class BlinkDetector {
       lastBlinkTime: this.lastBlinkTime,
       lastBlinkDurationMs: this.lastBlinkDurationMs,
       lastBlinkType: this.lastBlinkType,
+      isGlassesMode: isGlasses,
       candidateLogs: this.candidateLogs,
     };
   }
@@ -1011,27 +1080,30 @@ export class BlinkDetector {
    */
   private evaluateAndCommitBlink(
     timestamp: number,
-    thresholds: BlinkThresholdSnapshot
+    thresholds: BlinkThresholdSnapshot,
+    isChallengeActive = false
   ): { isBlinkEvent: boolean; committedEvent?: ValidatedBlinkEvent } {
     if (!this.hasEnteredClosedPhase || this.closingStartTime <= 0) {
       return { isBlinkEvent: false };
     }
 
+    const isGlasses = !!this.config.glassesMode;
     const duration = Math.max(1, timestamp - this.closingStartTime);
     const dropPct =
       thresholds.baselineEAR > 0
         ? ((thresholds.baselineEAR - this.minEARReached) / thresholds.baselineEAR) * 100
         : 0;
 
-    // 1. Temporal duration window check: allows quick 50-100ms blinks (min 35ms from onset to reopen) up to 650ms
-    if (duration < this.config.minBlinkDurationMs) {
+    // 1. Temporal duration window check: allows quick blinks (min 22ms in challenge mode, 28ms with glasses, 35ms in regular mode) up to 650ms
+    const minDuration = isChallengeActive ? 22 : this.config.minBlinkDurationMs;
+    if (duration < minDuration) {
       this.recordCandidateLog(
         timestamp,
         duration,
         this.minEARReached,
         thresholds.baselineEAR,
         'REJECTED',
-        `Rejected: Sub-threshold duration (${Math.round(duration)}ms < ${this.config.minBlinkDurationMs}ms noise floor)`
+        `Rejected: Sub-threshold duration (${Math.round(duration)}ms < ${minDuration}ms noise floor)`
       );
       return { isBlinkEvent: false };
     }
@@ -1048,11 +1120,16 @@ export class BlinkDetector {
       return { isBlinkEvent: false };
     }
 
-    // 2. Verify relative eye-opening reduction reached closure threshold (or asymmetric/blendshape threshold)
+    // 2. Verify relative eye-opening reduction reached closure threshold
+    const minSingleDropThreshold = isGlasses ? 0.12 : 0.155;
     const isClosureReached =
       this.minEARReached <= thresholds.closureThresholdEAR ||
-      this.maxSingleEyeDropRatio >= 0.155 ||
-      this.maxClosureReached >= this.config.closureScoreThreshold;
+      this.maxSingleEyeDropRatio >= minSingleDropThreshold ||
+      this.maxClosureReached >= this.config.closureScoreThreshold ||
+      this.hasBlendshapeClosureTrigger ||
+      this.minRawEARReached < thresholds.baselineEAR * (isGlasses ? 0.84 : 0.78) ||
+      (thresholds.baselineEAR >= (isGlasses ? 0.20 : 0.22) && this.minRawEARReached < (isGlasses ? 0.27 : 0.25)) ||
+      (isChallengeActive && (this.minRawEARReached < thresholds.baselineEAR * (isGlasses ? 0.86 : 0.82) || this.minRawEARReached < 0.26));
 
     if (!isClosureReached) {
       this.recordCandidateLog(
@@ -1061,7 +1138,7 @@ export class BlinkDetector {
         this.minEARReached,
         thresholds.baselineEAR,
         'REJECTED',
-        `Rejected: Insufficient relative EAR drop (${dropPct.toFixed(1)}% < 15.5% threshold)`
+        `Rejected: Insufficient relative EAR drop (${dropPct.toFixed(1)}% < ${(minSingleDropThreshold * 100).toFixed(1)}% threshold)`
       );
       return { isBlinkEvent: false };
     }
@@ -1231,5 +1308,6 @@ export class BlinkDetector {
     this.maxSingleEyeDropRatio = 0;
     this.minPartnerEyeDropRatio = 0;
     this.hasEnteredClosedPhase = false;
+    this.hasBlendshapeClosureTrigger = false;
   }
 }

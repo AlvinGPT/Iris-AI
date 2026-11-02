@@ -588,77 +588,77 @@ export const ROUTINE_ORDER: Array<'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6'> = [
 export const CLIP_MANIFEST: Record<string, ClipManifestEntry> = {
   idle_loop: {
     clipId: 'idle_loop',
-    file: '/ocure/clips/idle_loop.mp4',
+    file: './ocure/clips/idle_loop.mp4',
     shot: 'idle',
     durationSeconds: 8,
     loop: true,
   },
   eyes_blink_complete: {
     clipId: 'eyes_blink_complete',
-    file: '/ocure/clips/eyes_blink_complete.mp4',
+    file: './ocure/clips/eyes_blink_complete.mp4',
     shot: 'eyes_closeup',
     durationSeconds: 8,
     loop: true,
   },
   eyes_closure_rest: {
     clipId: 'eyes_closure_rest',
-    file: '/ocure/clips/eyes_closure_rest.mp4',
+    file: './ocure/clips/eyes_closure_rest.mp4',
     shot: 'eyes_closeup',
     durationSeconds: 8,
     loop: true,
   },
   eyes_horizontal: {
     clipId: 'eyes_horizontal',
-    file: '/ocure/clips/eyes_horizontal.mp4',
+    file: './ocure/clips/eyes_horizontal.mp4',
     shot: 'eyes_closeup',
     durationSeconds: 8,
     loop: true,
   },
   eyes_vertical: {
     clipId: 'eyes_vertical',
-    file: '/ocure/clips/eyes_vertical.mp4',
+    file: './ocure/clips/eyes_vertical.mp4',
     shot: 'eyes_closeup',
     durationSeconds: 8,
     loop: true,
   },
   eyes_diagonal: {
     clipId: 'eyes_diagonal',
-    file: '/ocure/clips/eyes_diagonal.mp4',
+    file: './ocure/clips/eyes_diagonal.mp4',
     shot: 'eyes_closeup',
     durationSeconds: 8,
     loop: true,
   },
   face_settle_breathing: {
     clipId: 'face_settle_breathing',
-    file: '/ocure/clips/face_settle_breathing.mp4',
+    file: './ocure/clips/face_settle_breathing.mp4',
     shot: 'face_closeup',
     durationSeconds: 8,
     loop: true,
   },
   shoulder_relax: {
     clipId: 'shoulder_relax',
-    file: '/ocure/clips/shoulder_relax.mp4',
+    file: './ocure/clips/shoulder_relax.mp4',
     shot: 'medium',
     durationSeconds: 8,
     loop: true,
   },
   head_turn_slow: {
     clipId: 'head_turn_slow',
-    file: '/ocure/clips/head_turn_slow.mp4',
+    file: './ocure/clips/head_turn_slow.mp4',
     shot: 'medium',
     durationSeconds: 8,
     loop: true,
   },
   coach_complete: {
     clipId: 'coach_complete',
-    file: '/ocure/clips/coach_complete.mp4',
+    file: './ocure/clips/coach_complete.mp4',
     shot: 'face_closeup',
     durationSeconds: 8,
     loop: false,
   },
 };
 
-export const MASCOT_STILL_FALLBACK = '/ocure/mascot-still.png';
+export const MASCOT_STILL_FALLBACK = './ocure/mascot-still.png';
 
 export interface GuidedStepPhaseCue {
   atSec: number;

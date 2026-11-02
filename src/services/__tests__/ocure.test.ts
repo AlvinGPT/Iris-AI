@@ -4,6 +4,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import {
   classifyBlinkRate,
   selectNextRoutine,
@@ -841,7 +842,8 @@ assert(
 );
 
 for (const entry of Object.values(CLIP_MANIFEST)) {
-  const diskPath = `public${entry.file}`;
+  const cleanRel = entry.file.replace(/^\.?\//, '');
+  const diskPath = path.join('public', cleanRel);
   assert(
     fs.existsSync(diskPath) && fs.statSync(diskPath).size > 100000,
     `OCURE Clip File Present: ${entry.clipId} -> ${diskPath}`

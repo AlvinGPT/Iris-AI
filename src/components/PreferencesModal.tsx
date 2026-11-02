@@ -11,8 +11,6 @@ import {
   Shield,
   Cpu,
   Database,
-  Key,
-  Check,
   HardDrive,
 } from 'lucide-react';
 import { BehaviorMode } from '../types';
@@ -38,6 +36,8 @@ interface PreferencesModalProps {
   onOpenBlinkDebug?: () => void;
   onOpenOnboarding?: () => void;
   onOpenDocs?: () => void;
+  widgetDesign?: 'liquid-glass' | 'dark-vivid';
+  onChangeWidgetDesign?: (design: 'liquid-glass' | 'dark-vivid') => void;
 }
 
 export const PreferencesModal: React.FC<PreferencesModalProps> = ({
@@ -58,6 +58,8 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
   onQuickCalibrate,
   onOpenOnboarding,
   onOpenDocs,
+  widgetDesign = 'dark-vivid',
+  onChangeWidgetDesign,
 }) => {
   const {
     styleMode,
@@ -74,11 +76,8 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
   const isDesktop = typeof window !== 'undefined' && Boolean((window as any).irisNative?.isDesktop);
   const [isStartupEnabled, setIsStartupEnabled] = useState(false);
   const [platformInfo, setPlatformInfo] = useState<any>(null);
-  const [customKeyInput, setCustomKeyInput] = useState('');
-  const [hasCustomKey, setHasCustomKey] = useState(false);
-  const [isSavingKey, setIsSavingKey] = useState(false);
   const [pruningDb, setPruningDb] = useState(false);
-  const [vaultFeedbackMsg, setVaultFeedbackMsg] = useState<string | null>(null);
+  const [pruneMsg, setPruneMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -91,17 +90,6 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
       (window as any).irisNative.getPlatformInfo?.().then((info: any) => {
         setPlatformInfo(info);
       }).catch(() => {});
-
-      (window as any).irisNative.hasConfiguredApiKey?.().then((hasKey: boolean) => {
-        if (hasKey) setHasCustomKey(true);
-      }).catch(() => {});
-
-      fetch('/api/retis-status')
-        .then((r) => r.json())
-        .then((d) => {
-          if (d?.configured) setHasCustomKey(true);
-        })
-        .catch(() => {});
     }
   }, [isOpen, isDesktop]);
 
@@ -116,30 +104,6 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
     }
   };
 
-  const handleSaveApiKey = async () => {
-    if (!customKeyInput.trim()) return;
-    setIsSavingKey(true);
-    try {
-      if (isDesktop && (window as any).irisNative?.saveCustomApiKey) {
-        await (window as any).irisNative.saveCustomApiKey(customKeyInput.trim());
-      }
-      await fetch('/api/settings/gemini-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: customKeyInput.trim() }),
-      }).catch(() => {});
-      setHasCustomKey(true);
-      setCustomKeyInput('');
-      setVaultFeedbackMsg('Google AI Pro / Gemini API key encrypted & saved.');
-      setTimeout(() => setVaultFeedbackMsg(null), 3500);
-    } catch {
-      setVaultFeedbackMsg('Failed to save key.');
-      setTimeout(() => setVaultFeedbackMsg(null), 3500);
-    } finally {
-      setIsSavingKey(false);
-    }
-  };
-
   const handleManualPrune = async () => {
     setPruningDb(true);
     try {
@@ -150,11 +114,11 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
       });
       const data = await res.json();
       const count = data.result?.prunedMinutes ?? 0;
-      setVaultFeedbackMsg(`Pruned ${count} old records (>30 days). WAL checkpointed.`);
-      setTimeout(() => setVaultFeedbackMsg(null), 3500);
+      setPruneMsg(`Pruned ${count} old records (>30 days). WAL checkpointed.`);
+      setTimeout(() => setPruneMsg(null), 3500);
     } catch {
-      setVaultFeedbackMsg('Pruning completed.');
-      setTimeout(() => setVaultFeedbackMsg(null), 3500);
+      setPruneMsg('Pruning completed.');
+      setTimeout(() => setPruneMsg(null), 3500);
     } finally {
       setPruningDb(false);
     }
@@ -403,6 +367,78 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
                     style={{ backgroundColor: swatch.hex }}
                   />
                   <span className="text-[10px] font-dm truncate">{swatch.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Pupil Floating Widget Design (Liquid Glass vs Dark Frosted) */}
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center justify-between">
+            <label className="font-dm text-xs uppercase font-bold tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Pupil Widget Design</span>
+            </label>
+            <span className="text-[10px] font-dm px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 font-semibold border border-cyan-500/30">
+              Dual System
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {[
+              {
+                id: 'dark-vivid' as const,
+                label: 'Black / Dark Mode',
+                badge: 'Default',
+                desc: 'Deep dark glass aesthetic with ultra-crisp contrast',
+              },
+              {
+                id: 'liquid-glass' as const,
+                label: 'Liquid Glass',
+                badge: 'Translucent',
+                desc: 'Translucent glass refraction with bold black typography & logo',
+              },
+            ].map((design) => {
+              const isSelected = (widgetDesign || 'dark-vivid') === design.id;
+              return (
+                <button
+                  key={design.id}
+                  type="button"
+                  onClick={() => onChangeWidgetDesign?.(design.id)}
+                  className={`p-3.5 rounded-2xl text-left transition-all duration-150 ease-out cursor-pointer flex flex-col justify-between gap-1.5 ${
+                    isMinimal
+                      ? isDark
+                        ? isSelected
+                          ? 'bg-white/[0.12] border-2 border-cyan-400 shadow-[0_8px_22px_-4px_rgba(6,182,212,0.35)] -translate-y-0.5 text-[#F5EDE4]'
+                          : 'bg-white/[0.05] hover:bg-white/[0.10] border border-white/[0.12] text-[#B8AAA0]'
+                        : isSelected
+                        ? 'bg-white border-2 border-cyan-600 shadow-[0_8px_22px_-4px_rgba(6,182,212,0.25)] -translate-y-0.5 text-[#0F172A]'
+                        : 'bg-white/65 hover:bg-white border border-slate-200/80 text-[#475569]'
+                      : isDark
+                      ? isSelected
+                        ? 'bg-[var(--vivid-accent,#D4FF3F)] text-[var(--vivid-accent-fg,#0D0D0D)] border-2 border-[#F5F5F0] shadow-[3px_3px_0px_#F5F5F0] -translate-y-0.5'
+                        : 'bg-[#262626] hover:bg-[#323232] text-[#F5F5F0] border-2 border-[#F5F5F0] shadow-[2px_2px_0px_#F5F5F0]'
+                      : isSelected
+                      ? 'bg-[#FFD84D] text-black border-2 border-black shadow-[3px_3px_0px_#000000] -translate-y-0.5'
+                      : 'bg-white hover:bg-[#55C7F2] text-black border-2 border-black shadow-[2px_2px_0px_#000000]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full">
+                    <span className="text-xs font-bold block">{design.label}</span>
+                    <span
+                      className={`text-[9px] font-dm uppercase px-1.5 py-0.5 rounded font-bold ${
+                        isSelected
+                          ? 'bg-cyan-500 text-black'
+                          : 'bg-white/10 text-neutral-400'
+                      }`}
+                    >
+                      {design.badge}
+                    </span>
+                  </div>
+                  <span className="text-[11px] opacity-80 leading-snug block mt-0.5">
+                    {design.desc}
+                  </span>
                 </button>
               );
             })}
@@ -701,41 +737,9 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({
             </button>
           </div>
 
-          {/* Masked Custom Gemini API Key Input */}
-          <div className="flex flex-col gap-1.5 py-1 border-t border-black/10 dark:border-white/10">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold font-dm flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5" />
-                Encrypted Gemini API Key Vault
-              </span>
-              {hasCustomKey && (
-                <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
-                  <Check className="w-3 h-3" /> Vault Key Active
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                placeholder={hasCustomKey ? '••••••••••••••••••••••••' : 'Enter AIza... Gemini Key'}
-                value={customKeyInput}
-                onChange={(e) => setCustomKeyInput(e.target.value)}
-                className="flex-1 bg-black/10 dark:bg-white/10 px-3 py-1.5 rounded-xl text-xs font-mono outline-none border border-black/15 dark:border-white/15 focus:border-emerald-500"
-              />
-              <button
-                type="button"
-                disabled={!customKeyInput.trim() || isSavingKey}
-                onClick={handleSaveApiKey}
-                className="btn-pill-primary py-1.5 px-3.5 text-xs font-dm disabled:opacity-50"
-              >
-                <span>Save</span>
-              </button>
-            </div>
-          </div>
-
-          {vaultFeedbackMsg && (
+          {pruneMsg && (
             <div className="text-[11px] font-dm text-emerald-500 bg-emerald-500/10 p-2 rounded-xl text-center">
-              {vaultFeedbackMsg}
+              {pruneMsg}
             </div>
           )}
         </div>

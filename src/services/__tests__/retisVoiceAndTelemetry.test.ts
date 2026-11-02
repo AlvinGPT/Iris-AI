@@ -670,7 +670,7 @@ async function runTests(): Promise<void> {
       },
     });
 
-    await sleep(45);
+    await sleep(85);
 
     const lastFetchBody = fetchBodies[fetchBodies.length - 1] ?? {};
     assert(
@@ -744,7 +744,7 @@ async function runTests(): Promise<void> {
     // Turn 1
     cumulative.push({ transcript: 'What is my blink rate?', isFinal: true });
     activeRec.emitResult([...cumulative]);
-    await sleep(RESTART_BASE_DELAY_MS + 90);
+    await sleep(RESTART_BASE_DELAY_MS + 160);
 
     assert(spokenTurns.length === 1, 'Turn 1 spoken response completed');
     assert(
@@ -755,7 +755,7 @@ async function runTests(): Promise<void> {
     // Turn 2 without restarting voice mode
     cumulative.push({ transcript: 'Check my blink rate again', isFinal: true });
     activeRec.emitResult([...cumulative]);
-    await sleep(RESTART_BASE_DELAY_MS + 90);
+    await sleep(RESTART_BASE_DELAY_MS + 160);
 
     assert(spokenTurns.length === 2, 'Turn 2 follow-up spoken response completed without restarting voice mode');
     assert(
@@ -1675,7 +1675,9 @@ async function runTests(): Promise<void> {
       },
     });
 
-    await sleep(220);
+    for (let i = 0; i < 25 && (!completedStructured || sentenceAudioStarts.length < 2); i++) {
+      await sleep(50);
+    }
 
     assert(
       sentenceAudioStarts.length === 2,

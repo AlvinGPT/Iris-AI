@@ -15,6 +15,7 @@
  */
 
 import type { OcureVoiceDeliveryContext } from '../data/ocureExercises';
+import { ttsService } from './ttsService';
 
 export const OCURE_AUDIO_CONFIG = {
   FADE_IN_MS: 10, // ~10 ms fade-in applied to every line's buffer (OCURE_VOICE.md §5)
@@ -169,28 +170,43 @@ const NOVELTY_VOICE_BLACKLIST = [
   'wobble',
   'zarvox',
   'espeak',
+  // Legacy robotic OS voices — harsh, artificially generated
+  'zira',
+  'hazel',
+  'david',
+  'mark',
+  'george',
 ];
 
 const PREFERRED_VOICE_KEYWORDS = [
+  // Windows 11 high-quality neural voices (highest priority)
+  'aria (natural)',
+  'jenny (natural)',
+  'sonia (natural)',
+  'natural',
+  // macOS premium/enhanced female voices
   'ava (premium)',
   'ava (enhanced)',
   'samantha (enhanced)',
   'allison (enhanced)',
+  // Named female voices (cross-platform)
   'jenny',
   'aria',
   'sonia',
   'ava',
   'samantha',
   'allison',
-  'natural',
-  'neural',
-  'google us english',
+  // Google cloud female voices
+  'google us english female',
   'google uk english female',
+  // Quality tier keywords
+  'neural',
   'karen',
   'moira',
   'serena',
   'premium',
   'enhanced',
+  'google us english',
 ];
 
 function scoreBrowserVoice(voice: SpeechSynthesisVoice): number {
@@ -223,6 +239,11 @@ function scoreBrowserVoice(voice: SpeechSynthesisVoice): number {
     score += 8;
   }
 
+  // Strong bonus for Windows 11 / modern neural natural voices
+  if (nameLower.includes('(natural)') || nameLower.includes('online (natural)')) {
+    score += 50;
+  }
+
   for (let i = 0; i < PREFERRED_VOICE_KEYWORDS.length; i++) {
     const keyword = PREFERRED_VOICE_KEYWORDS[i];
     if (nameLower.includes(keyword)) {
@@ -236,6 +257,94 @@ function scoreBrowserVoice(voice: SpeechSynthesisVoice): number {
   }
 
   return score;
+}
+
+/**
+ * Smart Selection of Realistic Neural Voices
+ * 
+ * Strict priority order:
+ * 1. 'Google UK English Female'
+ * 2. 'Google US English'
+ * 3. Voices containing 'Aria Online (Natural)' or 'Jenny Online (Natural)'
+ * 4. Any voice containing 'Natural' or 'Online' combined with Female characteristics.
+ * 5. Modern English Natural / Neural voices
+ * 6. Top scoring candidate via scoreBrowserVoice()
+ * 
+ * Explicitly rejects legacy robotic voices (Zira, Hazel, David, Mark, George, and novelty voices).
+ */
+export function getBestFemaleVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  if (!voices || voices.length === 0) return null;
+
+  // Filter out any known blacklisted legacy/male/novelty voices
+  const isBlacklisted = (name: string) => {
+    const lower = name.toLowerCase();
+    return NOVELTY_VOICE_BLACKLIST.some((b) => lower.includes(b));
+  };
+
+  const candidates = voices.filter((v) => !isBlacklisted(v.name));
+  const pool = candidates.length > 0 ? candidates : voices;
+
+  // 1. Exact priority: 'Google UK English Female'
+  const googleUkFemale = pool.find((v) =>
+    v.name.toLowerCase().includes('google uk english female')
+  );
+  if (googleUkFemale) return googleUkFemale;
+
+  // 2. Exact priority: 'Google US English'
+  const googleUs = pool.find((v) =>
+    v.name.toLowerCase().includes('google us english')
+  );
+  if (googleUs) return googleUs;
+
+  // 3. Exact priority: Voices containing 'Aria Online (Natural)' or 'Jenny Online (Natural)'
+  const ariaJennyOnline = pool.find((v) => {
+    const lower = v.name.toLowerCase();
+    const isAria = lower.includes('aria');
+    const isJenny = lower.includes('jenny');
+    const isNaturalOrOnline = lower.includes('(natural)') || lower.includes('natural') || lower.includes('online');
+    return (isAria || isJenny) && isNaturalOrOnline;
+  });
+  if (ariaJennyOnline) return ariaJennyOnline;
+
+  // 4. Any voice containing 'Natural' or 'Online' combined with Female characteristics
+  const naturalFemale = pool.find((v) => {
+    const lower = v.name.toLowerCase();
+    const isNaturalOrOnline = lower.includes('natural') || lower.includes('online') || lower.includes('neural');
+    const isFemale =
+      lower.includes('female') ||
+      lower.includes('aria') ||
+      lower.includes('jenny') ||
+      lower.includes('sonia') ||
+      lower.includes('ava') ||
+      lower.includes('samantha') ||
+      lower.includes('allison');
+    return isNaturalOrOnline && isFemale;
+  });
+  if (naturalFemale) return naturalFemale;
+
+  // 5. Any other Natural/Neural voice in English
+  const anyNaturalEnglish = pool.find((v) => {
+    const lower = v.name.toLowerCase();
+    const langLower = (v.lang || '').toLowerCase();
+    return (
+      (lower.includes('natural') || lower.includes('neural')) &&
+      langLower.startsWith('en')
+    );
+  });
+  if (anyNaturalEnglish) return anyNaturalEnglish;
+
+  // 6. Fallback to scoreBrowserVoice best scoring voice
+  let bestVoice: SpeechSynthesisVoice | null = null;
+  let bestScore = -999;
+  for (const v of pool) {
+    const s = scoreBrowserVoice(v);
+    if (s > bestScore) {
+      bestScore = s;
+      bestVoice = v;
+    }
+  }
+
+  return bestVoice || pool.find((v) => (v.lang || '').toLowerCase().startsWith('en')) || pool[0];
 }
 
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -534,19 +643,23 @@ class OcureVoiceServiceImpl {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      if (this.isBrowserSpeechAvailable()) {
-        this.loadBrowserVoices();
-        try {
-          if ('onvoiceschanged' in window.speechSynthesis) {
-            window.speechSynthesis.addEventListener('voiceschanged', () => {
+      try {
+        if (this.isBrowserSpeechAvailable()) {
+          this.loadBrowserVoices();
+          try {
+            if ('onvoiceschanged' in window.speechSynthesis) {
+              window.speechSynthesis.addEventListener('voiceschanged', () => {
+                this.loadBrowserVoices();
+              });
+            }
+          } catch {
+            window.speechSynthesis.onvoiceschanged = () => {
               this.loadBrowserVoices();
-            });
+            };
           }
-        } catch {
-          window.speechSynthesis.onvoiceschanged = () => {
-            this.loadBrowserVoices();
-          };
         }
+      } catch (err) {
+        console.warn('[OCURE] Non-fatal voice init error in constructor:', err);
       }
 
       if (typeof document !== 'undefined') {
@@ -624,26 +737,14 @@ class OcureVoiceServiceImpl {
     };
   }
 
-  private loadBrowserVoices(): void {
+  public loadBrowserVoices(): void {
     if (!this.isBrowserSpeechAvailable()) return;
     try {
       const voices = window.speechSynthesis.getVoices();
       if (!voices || voices.length === 0) return;
 
       this.voicesLoaded = true;
-      let bestVoice: SpeechSynthesisVoice | null = null;
-      let bestScore = -999;
-
-      for (const v of voices) {
-        const s = scoreBrowserVoice(v);
-        if (s > bestScore) {
-          bestScore = s;
-          bestVoice = v;
-        }
-      }
-
-      this.selectedBrowserVoice =
-        bestVoice || voices.find((v) => v.lang.startsWith('en')) || voices[0];
+      this.selectedBrowserVoice = getBestFemaleVoice(voices);
     } catch {
       // Ignore voice enumeration errors
     }
@@ -1123,7 +1224,7 @@ class OcureVoiceServiceImpl {
       return;
     }
 
-    if (!this.voicesLoaded) {
+    if (!this.voicesLoaded || !this.selectedBrowserVoice) {
       this.loadBrowserVoices();
     }
 
@@ -1150,7 +1251,7 @@ class OcureVoiceServiceImpl {
 
         utterance.rate = rate;
         utterance.pitch = pitch;
-        utterance.volume = 1.0;
+        utterance.volume = 0.9;
 
         if (idx === 0) {
           utterance.onstart = () => {
@@ -1300,8 +1401,8 @@ class OcureVoiceServiceImpl {
   private playNow(instructionId: string, cleanRaw: string, options: SpeakOptions): void {
     const {
       context = 'instruction',
-      rate = 0.96,
-      pitch = 1.0,
+      rate = 0.9,
+      pitch = 1.05,
       onStart,
       onEnd,
     } = options;
@@ -1333,32 +1434,23 @@ class OcureVoiceServiceImpl {
 
     void (async () => {
       try {
-        const playedNeural = await this.streamAndPlayNeuralTts(
-          instructionId,
-          normalizedText,
-          context,
-          turnId,
-          abortController.signal,
-          onStart,
-          handleFinished
-        );
-
-        if (!playedNeural && turnId === this.activeTurnId && !abortController.signal.aborted) {
-          if (this.isBrowserSpeechAvailable()) {
-            this.speakWithBrowserFallback(
-              instructionId,
-              normalizedText,
-              turnId,
-              rate,
-              pitch,
-              onStart,
-              handleFinished
-            );
-          } else {
-            this.setSpeaking(false);
-            handleFinished();
-          }
-        }
+        await ttsService.speak(normalizedText, 'en-US-AnaNeural', {
+          rate: '+0%',
+          pitch: '+0Hz',
+          volume: '+0%',
+          onStart: () => {
+            if (turnId === this.activeTurnId) {
+              this.setSpeaking(true);
+              onStart?.();
+            }
+          },
+          onEnd: () => {
+            if (turnId === this.activeTurnId) {
+              this.setSpeaking(false);
+              handleFinished();
+            }
+          },
+        });
       } catch {
         if (turnId === this.activeTurnId && !abortController.signal.aborted) {
           if (this.isBrowserSpeechAvailable()) {
@@ -1463,6 +1555,12 @@ class OcureVoiceServiceImpl {
       this.activeSourceNodes.clear();
     }
 
+    try {
+      ttsService.cancel();
+    } catch {
+      // safe ignore
+    }
+
     if (
       this.lastActiveEngine === 'browser-speech-synthesis' &&
       this.speakingState &&
@@ -1488,3 +1586,4 @@ class OcureVoiceServiceImpl {
 }
 
 export const ocureVoiceService = new OcureVoiceServiceImpl();
+export { ttsService };

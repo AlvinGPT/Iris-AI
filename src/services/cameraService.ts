@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { CameraStatus, CameraPermissionState } from '../types';
+import { CameraStatus, CameraPermissionState, CameraAccessMode, CameraStreamDiagnostics } from '../types';
 
 export interface CameraDevice {
   deviceId: string;
@@ -14,6 +14,18 @@ export class CameraService {
   private permissionState: CameraPermissionState = 'Permission not requested';
   private errorMessage?: string;
   private listeners: Set<(status: CameraStatus, error?: string, permissionState?: CameraPermissionState) => void> = new Set();
+
+  // Multi-application shared mode & auto-recovery telemetry
+  private cameraMode: CameraAccessMode = 'SHARED_FRAME_SERVER';
+  private retryAttemptCount = 0;
+  private recoveryTimer: NodeJS.Timeout | null = null;
+  private isUserStopped = true;
+  private isTrackMuted = false;
+  private concurrentAppName: string | null = null;
+  private activeResolution: { width: number; height: number } | null = null;
+  private activeFps = 0;
+  private diagnosticsListeners: Set<(diag: CameraStreamDiagnostics) => void> = new Set();
+  private lastDeviceId?: string;
 
   public static getInstance(): CameraService {
     if (!CameraService.instance) {
@@ -34,6 +46,52 @@ export class CameraService {
     return () => {
       this.listeners.delete(fn);
     };
+  }
+
+  public addDiagnosticsListener(fn: (diag: CameraStreamDiagnostics) => void): () => void {
+    this.diagnosticsListeners.add(fn);
+    fn(this.getDiagnostics());
+    return () => {
+      this.diagnosticsListeners.delete(fn);
+    };
+  }
+
+  public getDiagnostics(): CameraStreamDiagnostics {
+    return {
+      width: this.activeResolution?.width || 0,
+      height: this.activeResolution?.height || 0,
+      fps: this.activeFps,
+      isMuted: this.isTrackMuted,
+      cameraMode: this.cameraMode,
+      retryAttempts: this.retryAttemptCount,
+      concurrentAppName: this.concurrentAppName,
+    };
+  }
+
+  private notifyDiagnostics(): void {
+    const diag = this.getDiagnostics();
+    this.diagnosticsListeners.forEach((fn) => {
+      try {
+        fn(diag);
+      } catch {}
+    });
+  }
+
+  public setConcurrentAppName(name: string | null): void {
+    this.concurrentAppName = name;
+    this.notifyDiagnostics();
+  }
+
+  public getCameraMode(): CameraAccessMode {
+    return this.cameraMode;
+  }
+
+  public getRetryAttempts(): number {
+    return this.retryAttemptCount;
+  }
+
+  public isTrackCurrentlyMuted(): boolean {
+    return this.isTrackMuted;
   }
 
   public getStatus(): CameraStatus {
@@ -61,6 +119,16 @@ export class CameraService {
     return tracks.length > 0 && tracks.some((t) => t.readyState === 'live');
   }
 
+  private isMeetingYieldActive = false;
+
+  public setMeetingYieldActive(active: boolean): void {
+    this.isMeetingYieldActive = active;
+  }
+
+  public getMeetingYieldActive(): boolean {
+    return this.isMeetingYieldActive;
+  }
+
   private setStatus(status: CameraStatus, error?: string, permissionState?: CameraPermissionState) {
     this.status = status;
     this.errorMessage = error;
@@ -70,15 +138,11 @@ export class CameraService {
     this.listeners.forEach((listener) => {
       try {
         listener(status, error, this.permissionState);
-      } catch {
-        // Safe ignore listener errors
-      }
+      } catch {}
     });
+    this.notifyDiagnostics();
   }
 
-  /**
-   * Check if getUserMedia is supported in the current environment
-   */
   public isSupported(): boolean {
     return !!(
       typeof navigator !== 'undefined' &&
@@ -87,9 +151,6 @@ export class CameraService {
     );
   }
 
-  /**
-   * Check if camera permission was previously granted in localStorage
-   */
   public static hasStoredPermission(): boolean {
     try {
       return (
@@ -101,36 +162,22 @@ export class CameraService {
     }
   }
 
-  /**
-   * Mark camera permission as granted persistently
-   */
   public static markPermissionGranted(): void {
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('iris_camera_permission_granted', 'true');
       }
-    } catch {
-      // Safe ignore
-    }
+    } catch {}
   }
 
-  /**
-   * Clear camera permission in storage if explicitly revoked
-   */
   public static clearStoredPermission(): void {
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem('iris_camera_permission_granted');
       }
-    } catch {
-      // Safe ignore
-    }
+    } catch {}
   }
 
-  /**
-   * Query the browser Permissions API for camera status.
-   * Always checks live browser permission first when supported so revoked permissions are detected immediately.
-   */
   public static async checkBrowserPermission(): Promise<'granted' | 'prompt' | 'denied'> {
     if (
       typeof navigator !== 'undefined' &&
@@ -150,23 +197,17 @@ export class CameraService {
           return 'denied';
         }
         if (queryResult.state === 'prompt') {
-          // If browser explicitly says 'prompt', user has not granted or has reset permission
           return CameraService.hasStoredPermission() ? 'granted' : 'prompt';
         }
-      } catch {
-        // Fallback for browsers that do not support { name: 'camera' }
-      }
+      } catch {}
     }
-
     return CameraService.hasStoredPermission() ? 'granted' : 'prompt';
   }
 
-  /**
-   * Classify a DOMException or Error from getUserMedia into an explicit CameraPermissionState
-   */
   public static classifyCameraError(err: unknown): {
     permissionState: CameraPermissionState;
     userFriendlyError: string;
+    isBusyLock: boolean;
   } {
     if (err instanceof DOMException || (err && typeof err === 'object' && 'name' in err)) {
       const name = String((err as { name: string }).name);
@@ -185,6 +226,7 @@ export class CameraService {
           permissionState: 'Camera blocked',
           userFriendlyError:
             'Camera permission was denied or blocked. Enable camera access in your browser or privacy settings and try again.',
+          isBusyLock: false,
         };
       }
 
@@ -198,6 +240,7 @@ export class CameraService {
           permissionState: 'Camera unavailable',
           userFriendlyError:
             'No camera was detected on this device. Connect a camera or check your hardware settings.',
+          isBusyLock: false,
         };
       }
 
@@ -211,7 +254,8 @@ export class CameraService {
         return {
           permissionState: 'Camera in use by another application',
           userFriendlyError:
-            'Your camera is currently in use by another application (e.g. video call). Close that application to monitor here.',
+            'Your camera is currently in use by another application (e.g. video call). IRIS will connect in shared mode as soon as possible.',
+          isBusyLock: true,
         };
       }
 
@@ -219,7 +263,8 @@ export class CameraService {
         return {
           permissionState: 'Camera initialization failed',
           userFriendlyError:
-            'The camera stream could not be initialized with the requested configuration. Please retry.',
+            'The camera stream could not be initialized with the requested configuration. Retrying...',
+          isBusyLock: false,
         };
       }
     }
@@ -231,13 +276,15 @@ export class CameraService {
         permissionState: 'Camera blocked',
         userFriendlyError:
           'Camera permission was denied or blocked. Enable camera access in your browser or privacy settings and try again.',
+        isBusyLock: false,
       };
     }
-    if (rawMsg.toLowerCase().includes('in use') || rawMsg.toLowerCase().includes('notreadable')) {
+    if (rawMsg.toLowerCase().includes('in use') || rawMsg.toLowerCase().includes('notreadable') || rawMsg.toLowerCase().includes('trackstart')) {
       return {
         permissionState: 'Camera in use by another application',
         userFriendlyError:
-          'Your camera is currently being used by another application. Close or release the camera in that application before retrying.',
+          'Your camera is currently in use by another application. IRIS is recovering connection in shared mode.',
+        isBusyLock: true,
       };
     }
     if (rawMsg.toLowerCase().includes('not supported') || rawMsg.toLowerCase().includes('unavailable') || rawMsg.toLowerCase().includes('not found')) {
@@ -245,23 +292,21 @@ export class CameraService {
         permissionState: 'Camera unavailable',
         userFriendlyError:
           'Camera access is unavailable in this environment or no camera device was found.',
+        isBusyLock: false,
       };
     }
 
     return {
       permissionState: 'Camera initialization failed',
-      userFriendlyError: rawMsg || 'Camera initialization failed. Please check your camera connection and try again.',
+      userFriendlyError: rawMsg || 'Camera initialization failed. Checking connection...',
+      isBusyLock: false,
     };
   }
 
-  /**
-   * Enumerate available video input devices
-   */
   public async getAvailableCameras(): Promise<CameraDevice[]> {
     if (!this.isSupported() || !navigator.mediaDevices.enumerateDevices) {
       return [];
     }
-
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       return devices
@@ -276,10 +321,10 @@ export class CameraService {
   }
 
   /**
-   * Attach existing stream or request permission and start the camera stream.
-   * If an active stream already exists, reuses it immediately without prompting the user.
+   * Acquire a cooperative, non-exclusive webcam stream using Windows Media Foundation
+   * Frame Server shared mode constraints.
    */
-  public async start(
+  public async acquireSharedCameraStream(
     videoElement: HTMLVideoElement,
     deviceId?: string
   ): Promise<MediaStream> {
@@ -289,40 +334,47 @@ export class CameraService {
       throw new Error(err);
     }
 
-    // Fast path: If camera is already streaming and tracks are live, reuse without re-prompting
+    this.videoElement = videoElement;
+    this.lastDeviceId = deviceId;
+    this.isUserStopped = false;
+
+    // Fast path: Reuse live active stream
     if (this.isStreamActive() && this.mediaStream) {
-      this.videoElement = videoElement;
       if (videoElement.srcObject !== this.mediaStream) {
         videoElement.srcObject = this.mediaStream;
         videoElement.playsInline = true;
         videoElement.muted = true;
         await videoElement.play().catch(() => {});
       }
-      this.setStatus('running', undefined, 'Permission granted');
+      this.clearRecoveryTimer();
+      this.retryAttemptCount = 0;
+      this.cameraMode = 'SHARED_FRAME_SERVER';
+      this.setStatus('running', undefined, 'Monitoring active');
       CameraService.markPermissionGranted();
       return this.mediaStream;
     }
 
-    // Stop stale inactive streams if any
+    // Stop stale streams cleanly
     this.stop(false);
-
     this.videoElement = videoElement;
     this.setStatus('requesting_permission', undefined, 'Requesting permission');
 
+    // Strict non-exclusive lightweight constraints (never exact constraints)
+    // Ensures Windows Frame Server treats this as cooperative client
     const constraints: MediaStreamConstraints = {
-      audio: false, // Strict rule: video only, never request microphone
+      audio: false,
       video: deviceId
         ? {
-            deviceId: { exact: deviceId },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 },
+            deviceId: { ideal: deviceId },
+            width: { ideal: 320, max: 640 },
+            height: { ideal: 240, max: 480 },
+            frameRate: { ideal: 20, max: 24 },
           }
         : {
-            facingMode: 'user',
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 },
+            facingMode: { ideal: 'user' },
+            width: { ideal: 320, max: 640 },
+            height: { ideal: 240, max: 480 },
+            frameRate: { ideal: 20, max: 24 },
           },
     };
 
@@ -331,10 +383,13 @@ export class CameraService {
       try {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (firstErr: unknown) {
-        // Only fallback if OverconstrainedError; do not re-prompt if permission was denied or device missing
         const name = firstErr && typeof firstErr === 'object' && 'name' in firstErr ? String((firstErr as { name: string }).name) : '';
         if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+          // Cooperative fallback with purely ideal video
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { width: { ideal: 320 }, height: { ideal: 240 } },
+          });
         } else {
           throw firstErr;
         }
@@ -343,16 +398,49 @@ export class CameraService {
       const tracks = stream.getVideoTracks();
       if (!tracks || tracks.length === 0 || tracks.every((t) => t.readyState === 'ended')) {
         stream.getTracks().forEach((t) => t.stop());
-        this.setStatus('error', 'Camera stream started without an active video track.', 'Camera initialization failed');
-        throw new Error('Camera initialization failed: no active video track.');
+        throw new Error('Camera stream returned without live video tracks.');
       }
 
+      // Success: Clear recovery timers and set live shared mode
+      this.clearRecoveryTimer();
+      this.retryAttemptCount = 0;
+      this.cameraMode = 'SHARED_FRAME_SERVER';
+
+      const primaryTrack = tracks[0];
+      this.isTrackMuted = primaryTrack.muted || false;
+
+      try {
+        const settings = primaryTrack.getSettings?.() || {};
+        this.activeResolution = {
+          width: settings.width || 320,
+          height: settings.height || 240,
+        };
+        this.activeFps = Math.round(settings.frameRate || 24);
+      } catch {
+        this.activeResolution = { width: 320, height: 240 };
+        this.activeFps = 24;
+      }
+
+      // Cooperative track listeners: Handle external app interruptions without killing IRIS
+      primaryTrack.addEventListener('mute', () => {
+        this.isTrackMuted = true;
+        this.notifyDiagnostics();
+        // If track remains muted after 800ms, silently re-acquire shared stream
+        setTimeout(() => {
+          if (this.isTrackMuted && !this.isUserStopped && this.cameraMode !== 'RECOVERING') {
+            this.scheduleAutoRecovery(videoElement, deviceId);
+          }
+        }, 800);
+      });
+
+      primaryTrack.addEventListener('unmute', () => {
+        this.isTrackMuted = false;
+        this.notifyDiagnostics();
+      });
+
       const handleTrackEnded = () => {
-        if (!this.mediaStream) return;
-        const live = this.mediaStream.getVideoTracks().filter((t) => t.readyState === 'live');
-        if (live.length === 0) {
-          this.setStatus('error', 'Camera was disconnected or stopped by system.', 'Camera unavailable');
-        }
+        if (this.isUserStopped) return;
+        this.scheduleAutoRecovery(videoElement, deviceId);
       };
 
       tracks.forEach((track) => {
@@ -367,7 +455,6 @@ export class CameraService {
       videoElement.playsInline = true;
       videoElement.muted = true;
 
-      // Wait for loadedmetadata event with a safety timeout so execution never hangs
       await new Promise<void>((resolve) => {
         let isResolved = false;
         const done = () => {
@@ -393,19 +480,103 @@ export class CameraService {
       });
 
       this.setStatus('running', undefined, 'Monitoring active');
+      this.notifyDiagnostics();
       return stream;
     } catch (err: unknown) {
-      this.stop(true);
       const classified = CameraService.classifyCameraError(err);
-      this.setStatus('error', classified.userFriendlyError, classified.permissionState);
+      if (classified.isBusyLock && !this.isUserStopped) {
+        this.scheduleAutoRecovery(videoElement, deviceId);
+      } else {
+        this.stop(true);
+        this.setStatus('error', classified.userFriendlyError, classified.permissionState);
+      }
       throw new Error(classified.userFriendlyError);
     }
   }
 
   /**
-   * Stop camera tracks. Only shuts off hardware if forceHardwareStop is true.
+   * Smart auto-recovery loop: pauses 1500ms for external apps to initialize,
+   * retries every 3 seconds up to 3 attempts, then falls back to standby probing every 8 seconds.
    */
+  public scheduleAutoRecovery(videoElement?: HTMLVideoElement | null, deviceId?: string): void {
+    if (this.isUserStopped) return;
+    if (this.recoveryTimer) return; // Recovery already in flight
+
+    const targetEl = videoElement || this.videoElement;
+    if (!targetEl) return;
+
+    const attempt = this.retryAttemptCount;
+    let delayMs = 3000;
+
+    if (attempt === 0) {
+      // Step 1: Rapid silent 800ms re-acquisition to rejoin shared Windows Frame Server stream
+      delayMs = 800;
+      this.cameraMode = 'RECOVERING';
+      this.setStatus(
+        'recovering',
+        'External camera app active. Rejoining shared stream...',
+        'Camera in use by another application'
+      );
+    } else if (attempt < 3) {
+      // Step 2: Retry every 3 seconds for 3 consecutive attempts
+      delayMs = 3000;
+      this.cameraMode = 'RECOVERING';
+      this.setStatus(
+        'recovering',
+        `Reconnecting shared camera stream (attempt ${attempt + 1}/3)...`,
+        'Camera in use by another application'
+      );
+    } else {
+      // Step 3: Standby mode when external app holds strict exclusive lock
+      delayMs = 8000;
+      this.cameraMode = 'STANDBY_EXCLUSIVE_LOCK';
+      this.setStatus(
+        'error',
+        'Standby (Exclusive Hardware Lock by External App). IRIS is actively monitoring to reconnect the instant shared mode is available.',
+        'Standby (Exclusive Hardware Lock by External App)'
+      );
+    }
+
+    this.notifyDiagnostics();
+
+    this.recoveryTimer = setTimeout(async () => {
+      this.recoveryTimer = null;
+      if (this.isUserStopped) return;
+      this.retryAttemptCount += 1;
+
+      try {
+        await this.acquireSharedCameraStream(targetEl, deviceId || this.lastDeviceId);
+      } catch {
+        // acquireSharedCameraStream handles subsequent scheduling
+      }
+    }, delayMs);
+  }
+
+  public clearRecoveryTimer(): void {
+    if (this.recoveryTimer) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
+  }
+
+  public resetRecoveryAttempts(): void {
+    this.clearRecoveryTimer();
+    this.retryAttemptCount = 0;
+    if (this.videoElement && !this.isUserStopped) {
+      this.acquireSharedCameraStream(this.videoElement, this.lastDeviceId).catch(() => {});
+    }
+  }
+
+  public async start(videoElement: HTMLVideoElement, deviceId?: string): Promise<MediaStream> {
+    this.isUserStopped = false;
+    return this.acquireSharedCameraStream(videoElement, deviceId);
+  }
+
   public stop(forceHardwareStop = true): void {
+    this.isUserStopped = true;
+    this.clearRecoveryTimer();
+    this.retryAttemptCount = 0;
+
     if (this.status === 'stopping') return;
 
     if (forceHardwareStop && this.mediaStream) {
@@ -415,26 +586,23 @@ export class CameraService {
           track.onended = null;
           track.stop();
         });
-      } catch {
-        // Safe ignore
-      }
+      } catch {}
       this.mediaStream = null;
       if (this.videoElement) {
         try {
           this.videoElement.srcObject = null;
-        } catch {
-          // Safe ignore
-        }
+        } catch {}
         this.videoElement = null;
       }
+      this.activeResolution = null;
+      this.activeFps = 0;
+      this.isTrackMuted = false;
+      this.cameraMode = 'SHARED_FRAME_SERVER';
       this.setStatus('idle');
     } else if (!forceHardwareStop && this.videoElement) {
-      // Detach element without stopping hardware stream
       try {
         this.videoElement.srcObject = null;
-      } catch {
-        // Safe ignore
-      }
+      } catch {}
       this.videoElement = null;
     }
   }
@@ -448,9 +616,10 @@ export function useCamera(options?: { keepAliveOnUnmount?: boolean }) {
   const [permissionState, setPermissionState] = useState<CameraPermissionState>(service.getPermissionState());
   const [error, setError] = useState<string | undefined>(service.getError());
   const [stream, setStream] = useState<MediaStream | null>(service.getStream());
+  const [diagnostics, setDiagnostics] = useState<CameraStreamDiagnostics>(service.getDiagnostics());
 
   useEffect(() => {
-    const unsubscribe = service.addListener((newStatus, err, permState) => {
+    const unsubStatus = service.addListener((newStatus, err, permState) => {
       setStatus(newStatus);
       setError(err);
       if (permState) {
@@ -459,8 +628,13 @@ export function useCamera(options?: { keepAliveOnUnmount?: boolean }) {
       setStream(service.getStream());
     });
 
+    const unsubDiag = service.addDiagnosticsListener((diag) => {
+      setDiagnostics(diag);
+    });
+
     return () => {
-      unsubscribe();
+      unsubStatus();
+      unsubDiag();
       if (options?.keepAliveOnUnmount === false) {
         service.stop(true);
       }
@@ -485,15 +659,24 @@ export function useCamera(options?: { keepAliveOnUnmount?: boolean }) {
     [service]
   );
 
+  const resetRecovery = useCallback(() => {
+    service.resetRecoveryAttempts();
+  }, [service]);
+
   return {
     status,
     permissionState,
     error,
     stream,
+    diagnostics,
+    cameraMode: diagnostics.cameraMode,
     isStreamActive: service.isStreamActive(),
     isSupported: service.isSupported(),
     getAvailableCameras: () => service.getAvailableCameras(),
     startCamera,
     stopCamera,
+    resetRecovery,
+    setMeetingYieldActive: (active: boolean) => service.setMeetingYieldActive(active),
+    setConcurrentAppName: (name: string | null) => service.setConcurrentAppName(name),
   };
 }

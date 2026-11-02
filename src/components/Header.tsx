@@ -174,7 +174,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
             title="IRIS"
           >
-            <OrbitingEyeLogo size={36} className="w-9 h-9" />
+            <OrbitingEyeLogo size={36} className="w-9 h-9 transform scale-110 hover:scale-115 transition-transform" />
           </div>
 
           <div

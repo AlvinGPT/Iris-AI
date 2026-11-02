@@ -56,11 +56,25 @@ if (typeof window !== 'undefined') {
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import { ThemeProvider } from './context/ThemeContext';
+import IrisFloatingWidget from './components/IrisFloatingWidget';
+import IrisScreenEdgeOverlay from './components/IrisScreenEdgeOverlay';
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(
-  <ThemeProvider>
-    <App />
-  </ThemeProvider>
-);
+const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+const windowTarget = params ? params.get('window') : null;
+
+if (windowTarget === 'widget') {
+  document.documentElement.classList.add('iris-widget-window');
+  createRoot(document.getElementById('root')!).render(<IrisFloatingWidget />);
+} else if (windowTarget === 'edge-overlay') {
+  document.documentElement.classList.add('iris-edge-window');
+  createRoot(document.getElementById('root')!).render(<IrisScreenEdgeOverlay />);
+} else {
+  createRoot(document.getElementById('root')!).render(
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
+  );
+}
+
 

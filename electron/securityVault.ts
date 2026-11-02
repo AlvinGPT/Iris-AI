@@ -21,6 +21,27 @@ const VECTOR_C = Object.freeze([
   113, 62, 89, 233, 50, 219, 86, 47, 182, 14, 51, 26, 148, 186, 141, 47, 236, 110,
 ]);
 
+// Built-in Developer Gemini Key Split 1
+const VECTOR_GEMINI_A = Object.freeze([
+  81, 54, 222, 6, 91, 76, 68, 72, 249, 33, 91, 141, 80, 233, 79, 239, 132, 133, 250, 94, 126, 189,
+  30, 4, 149, 223, 246, 44, 183, 161, 32, 155, 9, 58, 52, 254, 205, 202, 45, 223, 210, 180, 117,
+  253, 227, 122, 114, 120, 212, 48, 150, 168, 117,
+]);
+
+// Built-in Developer Gemini Key Split 2
+const VECTOR_GEMINI_B = Object.freeze([
+  47, 37, 236, 30, 28, 158, 196, 18, 255, 190, 34, 38, 215, 242, 228, 55, 205, 8, 106, 250, 106, 76,
+  136, 44, 253, 230, 102, 58, 116, 203, 239, 197, 212, 222, 134, 94, 134, 155, 121, 47, 14, 121,
+  146, 10, 193, 117, 68, 167, 167, 51, 143, 254, 173,
+]);
+
+// Built-in Developer Gemini Key Split 3
+const VECTOR_GEMINI_C = Object.freeze([
+  63, 66, 28, 89, 37, 234, 210, 20, 48, 213, 75, 243, 222, 47, 228, 130, 33, 220, 247, 222, 100,
+  191, 245, 94, 12, 9, 193, 71, 156, 26, 250, 56, 168, 182, 202, 193, 122, 7, 26, 163, 174, 161,
+  141, 175, 107, 66, 7, 237, 23, 51, 64, 21, 191,
+]);
+
 /**
  * Reassemble an obfuscated secret in memory using multi-part XOR arithmetic.
  * Ensures zero plaintext API keys appear in source code or compiled binary distributions.
@@ -46,18 +67,77 @@ export function getFirebaseApiKey(): string {
 }
 
 /**
- * Resolve the Gemini API key securely in memory
+ * Resolve the built-in developer Gemini API key securely in memory
+ */
+export function getBuiltInGeminiApiKey(): string {
+  return deobfuscateXorVector(VECTOR_GEMINI_A, VECTOR_GEMINI_B, VECTOR_GEMINI_C);
+}
+
+const XOR_KEY_MASK = 'IRIS_RETIS_SECRET_SALT_2026';
+
+/**
+ * Encodes text with a cyclic XOR mask and returns hex string to protect against binary scraping.
+ */
+export function xorEncode(text: string, key = XOR_KEY_MASK): string {
+  const buf = Buffer.from(text, 'utf8');
+  const keyBuf = Buffer.from(key, 'utf8');
+  const out = Buffer.alloc(buf.length);
+  for (let i = 0; i < buf.length; i++) {
+    out[i] = buf[i] ^ keyBuf[i % keyBuf.length];
+  }
+  return out.toString('hex');
+}
+
+/**
+ * Decodes a hex string produced by xorEncode back to UTF-8 text.
+ */
+export function xorDecode(hex: string, key = XOR_KEY_MASK): string {
+  try {
+    const cleanHex = hex.startsWith('xor:') ? hex.slice(4).trim() : hex.trim();
+    if (!cleanHex || cleanHex.length % 2 !== 0) return '';
+    const buf = Buffer.from(cleanHex, 'hex');
+    const keyBuf = Buffer.from(key, 'utf8');
+    const out = Buffer.alloc(buf.length);
+    for (let i = 0; i < buf.length; i++) {
+      out[i] = buf[i] ^ keyBuf[i % keyBuf.length];
+    }
+    return out.toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Resolve the Gemini API key securely in memory.
+ * Supports XOR-encoded format in .env to prevent binary scraping,
+ * as well as encrypted vault storage and embedded 3-part XOR vectors.
  */
 export function getGeminiApiKey(): string {
+  // 1. Check XOR-encoded key in process.env
+  const xorEnvKey = (process.env.GEMINI_API_KEY_XOR || '').trim();
+  if (xorEnvKey) {
+    const decoded = xorDecode(xorEnvKey);
+    if (decoded && decoded.length > 10) return decoded;
+  }
+
+  // 2. Check GEMINI_API_KEY in process.env (supports plain or xor: prefix)
   const envKey = (process.env.GEMINI_API_KEY || '').trim();
   if (envKey && envKey !== 'MY_GEMINI_API_KEY') {
-    return envKey;
+    if (envKey.startsWith('xor:')) {
+      const decoded = xorDecode(envKey);
+      if (decoded && decoded.length > 10) return decoded;
+    } else if (!envKey.startsWith('AIzaSyAa')) {
+      return envKey;
+    }
   }
+
+  // 3. Check encrypted local vault
   const vaultedKey = readFromVault('gemini_api_key');
-  if (vaultedKey && vaultedKey.trim()) {
+  if (vaultedKey && vaultedKey.trim() && !vaultedKey.startsWith('AIzaSyAa')) {
     return vaultedKey.trim();
   }
-  // Check ~/.env or .env in process.cwd()
+
+  // 4. Check ~/.env or .env in process.cwd()
   try {
     const locations = [
       path.join(process.cwd(), '.env'),
@@ -66,15 +146,44 @@ export function getGeminiApiKey(): string {
     for (const loc of locations) {
       if (fs.existsSync(loc)) {
         const content = fs.readFileSync(loc, 'utf8');
+        const xorMatch = content.match(/^GEMINI_API_KEY_XOR\s*=\s*["']?([^"'\r\n]+)["']?/m);
+        if (xorMatch && xorMatch[1]) {
+          const dec = xorDecode(xorMatch[1].trim());
+          if (dec && dec.length > 10) return dec;
+        }
         const match = content.match(/^GEMINI_API_KEY\s*=\s*["']?([^"'\r\n]+)["']?/m);
         if (match && match[1] && match[1].trim() !== 'MY_GEMINI_API_KEY') {
-          return match[1].trim();
+          const val = match[1].trim();
+          if (val.startsWith('xor:')) {
+            const dec = xorDecode(val);
+            if (dec && dec.length > 10) return dec;
+          } else if (!val.startsWith('AIzaSyAa')) {
+            return val;
+          }
         }
       }
     }
   } catch {}
-  // Do NOT fall back to Firebase API key as it is restricted to Firebase Auth and blocked for Gemini API
-  return '';
+
+  // 5. Check ~/.aside/u/0/credentials.json if present
+  try {
+    const credPath = path.join(os.homedir(), '.aside', 'u', '0', 'credentials.json');
+    if (fs.existsSync(credPath)) {
+      const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+      if (cred?.google?.key && typeof cred.google.key === 'string' && cred.google.key.trim()) {
+        return cred.google.key.trim();
+      }
+    }
+  } catch {}
+
+  // 6. Always return the verified built-in developer Gemini API key from 3-split XOR vectors
+  const builtIn = getBuiltInGeminiApiKey();
+  try {
+    if (builtIn && !readFromVault('gemini_api_key')) {
+      saveToVault('gemini_api_key', builtIn);
+    }
+  } catch {}
+  return builtIn;
 }
 
 /**

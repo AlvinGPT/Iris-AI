@@ -12,6 +12,9 @@ import {
   Sparkles,
   TrendingUp,
   Radio,
+  Camera,
+  Glasses,
+  RotateCcw,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -56,6 +59,11 @@ interface DashboardScreenProps {
   onToggleMonitoring?: () => void;
   onOpenCalibration?: () => void;
   onOpenBlinkAudit?: () => void;
+  isGlassesMode?: boolean;
+  onToggleGlassesMode?: () => void;
+  onOpenCameraPanel?: () => void;
+  isManualModeOverride?: boolean;
+  onResetAutoMode?: () => void;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
@@ -74,6 +82,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onToggleMonitoring,
   onOpenCalibration,
   onOpenBlinkAudit,
+  isGlassesMode = false,
+  onToggleGlassesMode,
+  onOpenCameraPanel,
+  isManualModeOverride = false,
+  onResetAutoMode,
 }) => {
   const { isMinimal, isDark, accentColor } = useTheme();
 
@@ -488,6 +501,43 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               </span>
             </button>
 
+            {onOpenCameraPanel && (
+              <button
+                type="button"
+                onClick={onOpenCameraPanel}
+                className={`relative px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all duration-200 border ${
+                  telemetry.cameraDiagnostics?.cameraMode === 'STANDBY_EXCLUSIVE_LOCK' || telemetry.cameraDiagnostics?.cameraMode === 'STANDBY_LOCKED'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                    : telemetry.cameraDiagnostics?.concurrentAppName
+                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40 hover:bg-blue-500/30'
+                    : 'bg-white/10 text-white/90 border-white/15 hover:bg-white/15'
+                }`}
+                title={`Camera Compatibility & Glasses Detection Status${telemetry.cameraDiagnostics?.concurrentAppName ? ` (Shared with ${telemetry.cameraDiagnostics.concurrentAppName})` : ''}`}
+                aria-label="Camera Compatibility & Glasses Detection Status"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {telemetry.cameraDiagnostics?.concurrentAppName
+                    ? `Shared (${telemetry.cameraDiagnostics.concurrentAppName})`
+                    : 'Camera'}
+                </span>
+                {isGlassesMode && (
+                  <span title="Glasses-Optimized Mode active">
+                    <Glasses className="w-3.5 h-3.5 text-cyan-300 ml-0.5" />
+                  </span>
+                )}
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    telemetry.cameraDiagnostics?.cameraMode === 'STANDBY_EXCLUSIVE_LOCK' || telemetry.cameraDiagnostics?.cameraMode === 'STANDBY_LOCKED'
+                      ? 'bg-amber-400 animate-pulse'
+                      : isMonitoring
+                      ? 'bg-emerald-400'
+                      : 'bg-zinc-400'
+                  }`}
+                />
+              </button>
+            )}
+
             {onOpenCalibration && (
               <IconButton
                 icon={<Ruler className="w-4 h-4" />}
@@ -550,6 +600,25 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     BLINK
                   </span>
                 )}
+
+              {onToggleGlassesMode && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleGlassesMode();
+                  }}
+                  className={`btn-pill-secondary px-2.5 py-1 text-[11px] flex items-center gap-1 border ${
+                    isGlassesMode
+                      ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+                      : 'border-white/10 text-white/60 hover:text-white/90'
+                  }`}
+                  title={isGlassesMode ? 'Glasses-Optimized Mode active (Click to toggle)' : 'Enable Glasses Mode'}
+                >
+                  <Glasses className="w-3 h-3" />
+                  <span className="hidden sm:inline">Glasses</span>
+                </button>
+              )}
 
               {onOpenBlinkAudit && (
                 <button
@@ -736,20 +805,36 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               telemetry.isCalibrated && telemetry.faceDetected && isMonitoring && telemetry.avgScreenDistance !== null
                 ? telemetry.avgScreenDistance
                 : null;
+            const isNearWarning = displayDistance !== null && displayDistance < 38;
+            const distColorStyle =
+              displayDistance === null
+                ? undefined
+                : displayDistance < 38
+                ? '#EF4444'
+                : displayDistance < 42
+                ? '#F59E0B'
+                : '#10B981';
 
             return (
               <>
                 <div className="my-auto py-2 flex flex-col gap-3 z-10">
                   <div className="flex items-baseline justify-between">
-                    <div className="flex items-baseline gap-1.5">
+                    <div className="flex items-baseline gap-1.5" style={{ color: distColorStyle }}>
                       <AnimatedNumber
                         value={displayDistance}
                         fallback="--"
                         className="font-dm text-5xl sm:text-6xl font-bold leading-none tracking-[-0.03em] tabular-nums"
                       />
-                      <span className="font-dm text-lg font-semibold opacity-90">cm</span>
+                      <span
+                        className="font-dm text-lg font-semibold opacity-90"
+                      >
+                        cm
+                      </span>
                     </div>
-                    <span className="glass-badge font-dm font-bold uppercase tracking-wider text-[11px]">
+                    <span
+                      style={{ color: isNearWarning ? '#EF4444' : undefined, borderColor: isNearWarning ? 'rgba(239, 68, 68, 0.4)' : undefined }}
+                      className="glass-badge font-dm font-bold uppercase tracking-wider text-[11px]"
+                    >
                       {distanceStatus}
                     </span>
                   </div>
@@ -1021,12 +1106,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <Sliders className="w-5 h-5" />
           </div>
           <div className="flex flex-col min-w-0 justify-center">
-            <h3 className="font-cormorant text-xl font-bold">Modes</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-cormorant text-xl font-bold">Modes</h3>
+              {isManualModeOverride && (
+                <span className="glass-badge text-[10px] font-bold text-amber-400 border border-amber-400/30">
+                  Manual Override Active
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* 3 Modes Pills */}
+        {/* 3 Modes Pills + Reset to Auto Button */}
         <div className="flex flex-wrap items-center gap-2.5 shrink-0 min-w-0">
+          {isManualModeOverride && onResetAutoMode && (
+            <button
+              type="button"
+              onClick={onResetAutoMode}
+              className="px-3.5 py-2 rounded-full text-xs font-semibold flex items-center gap-1.5 border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-all cursor-pointer"
+              title="Click to reset to automatic app & camera detection"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset to Auto</span>
+            </button>
+          )}
+
           {[
             { id: 'gaming' as BehaviorMode, label: 'Gaming', sub: 'Lenient Breaks' },
             { id: 'default' as BehaviorMode, label: 'Default', sub: 'Standard Breaks' },

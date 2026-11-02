@@ -18,6 +18,7 @@ import { SessionLogsScreen } from './components/SessionLogsScreen';
 import { PreferencesModal } from './components/PreferencesModal';
 import { DistanceCalibrationModal } from './components/DistanceCalibrationModal';
 import { BlinkDebugModal } from './components/BlinkDebugModal';
+import { CameraCompatibilityPanel } from './components/CameraCompatibilityPanel';
 import { IrisEntrancePortal } from './components/IrisEntrancePortal';
 import { MacTitleBar } from './components/MacTitleBar';
 import { IrisOnboardingFlow } from './components/IrisOnboardingFlow';
@@ -48,13 +49,21 @@ import {
 import { LiveTelemetryStore } from './services/retisSnapshot';
 
 export default function App() {
-  const { styleMode, confirmStyleSelection, isStyleChooserOpen } = useTheme();
+  const { styleMode, isDark, confirmStyleSelection, isStyleChooserOpen } = useTheme();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const [isCalibrationOpen, setIsCalibrationOpen] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [isCameraPanelOpen, setIsCameraPanelOpen] = useState(false);
+  const [isGlassesMode, setIsGlassesMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('iris_glasses_mode_enabled') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // OCURE Coach session state & scheduled break offer state
@@ -83,6 +92,23 @@ export default function App() {
   const [breakIntervalMinutes, setBreakIntervalMinutes] = useState(20);
   const [audioAlerts, setAudioAlerts] = useState(true);
   const [postureSensitivity, setPostureSensitivity] = useState<'Low' | 'Medium' | 'High'>('Medium');
+  const [widgetDesign, setWidgetDesign] = useState<'liquid-glass' | 'dark-vivid'>(() => {
+    try {
+      const saved = localStorage.getItem('iris_pupil_widget_design');
+      if (saved === 'liquid-glass' || saved === 'dark-vivid') return saved;
+    } catch {}
+    return 'dark-vivid';
+  });
+  const [modeNotice, setModeNotice] = useState<{ message: string; type: 'warning' | 'info' } | null>(null);
+  const modeNoticeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleChangeWidgetDesign = useCallback((design: 'liquid-glass' | 'dark-vivid') => {
+    setWidgetDesign(design);
+    try {
+      localStorage.setItem('iris_pupil_widget_design', design);
+    } catch {}
+    window.irisNative?.setWidgetDesign?.(design);
+  }, []);
 
   const distanceEstimatorRef = useRef(new DistanceEstimator());
   const blinkDetectorRef = useRef(new BlinkDetector());
@@ -107,6 +133,32 @@ export default function App() {
   const lastLockinWarningRef = useRef(0);
   const isDocumentHiddenRef = useRef(false);
   const sustainedProximityStartMsRef = useRef<number | null>(null);
+  const lastEmittedBlinkCountRef = useRef<number>(0);
+  const lastWidgetTelemetrySyncMsRef = useRef<number>(0);
+
+  // Persistent rolling telemetry window buffer (seeded from recent SQLite/local record)
+  const initialHistoryRecord = (TelemetryStorageService.getRecords()[0] as any) || (TelemetryStorageService.getLiveSamples().slice(-1)[0] as any);
+  const initialSeedBlink = Number(initialHistoryRecord?.avgBlinkRate || initialHistoryRecord?.blinkRate || 15);
+  const initialSeedDist = Number(initialHistoryRecord?.avgDistanceCm || initialHistoryRecord?.distanceCm || 52);
+  const lastKnownBlinkRateRef = useRef<number>(initialSeedBlink);
+  const lastKnownDistanceCmRef = useRef<number>(initialSeedDist);
+
+  // Proximity and blink targets reactivity refs
+  const rawTooCloseStartMsRef = useRef<number | null>(null);
+  const rawNormalDistanceStartMsRef = useRef<number | null>(null);
+  const isTooCloseRef = useRef<boolean>(false);
+  const lastBlinkCompletionGraceMsRef = useRef<number>(0);
+  const isBlinkChallengeActiveRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const unsubChallenge = window.irisNative?.onBlinkChallengeCompleted?.(() => {
+      lastBlinkCompletionGraceMsRef.current = Date.now();
+      blinkDetectorRef.current?.resetTransientState?.();
+    });
+    return () => {
+      if (unsubChallenge) unsubChallenge();
+    };
+  }, []);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -126,6 +178,69 @@ export default function App() {
   // Sync historical local telemetry records with the SQLite database
   useEffect(() => {
     TelemetryStorageService.syncLocalToDatabase().catch(() => {});
+  }, []);
+
+  // Synchronize initial mode, send initial seeded telemetry, and listen for widget mode updates
+  useEffect(() => {
+    window.irisNative?.sendLiveTelemetry?.({
+      blinkRate: lastKnownBlinkRateRef.current,
+      screenDistance: lastKnownDistanceCmRef.current,
+      isTracking: true,
+      faceDetected: true,
+      fatigueScore: 1.0,
+      activeMode: telemetry.activeMode,
+    });
+
+    window.irisNative?.getWidgetState?.().then((state) => {
+      if (state?.activeMode) {
+        setTelemetry((prev) => prev.activeMode === state.activeMode ? prev : ({
+          ...prev,
+          activeMode: state.activeMode,
+          distanceOptimal: state.activeMode === 'gaming' ? 35 : state.activeMode === 'meeting' ? 45 : 40,
+        }));
+      }
+    }).catch(() => {});
+
+    window.irisNative?.getModeState?.().then((mState) => {
+      if (mState?.currentActiveMode) {
+        setTelemetry((prev) => ({
+          ...prev,
+          activeMode: mState.currentActiveMode,
+          isManualModeOverride: Boolean(mState.isManualModeOverride),
+          distanceOptimal: mState.currentActiveMode === 'gaming' ? 35 : mState.currentActiveMode === 'meeting' ? 45 : 40,
+        }));
+      }
+    }).catch(() => {});
+
+    const unsubWidget = window.irisNative?.onWidgetStateUpdate?.((state) => {
+      if (state?.activeMode) {
+        setTelemetry((prev) => prev.activeMode === state.activeMode ? prev : ({
+          ...prev,
+          activeMode: state.activeMode,
+          distanceOptimal: state.activeMode === 'gaming' ? 35 : state.activeMode === 'meeting' ? 45 : 40,
+        }));
+      }
+      if (state?.widgetDesign === 'liquid-glass' || state?.widgetDesign === 'dark-vivid') {
+        setWidgetDesign(state.widgetDesign);
+        try {
+          localStorage.setItem('iris_pupil_widget_design', state.widgetDesign);
+        } catch {}
+      }
+    });
+
+    const unsubDesign = window.irisNative?.onWidgetDesignUpdate?.((design) => {
+      if (design === 'liquid-glass' || design === 'dark-vivid') {
+        setWidgetDesign(design);
+        try {
+          localStorage.setItem('iris_pupil_widget_design', design);
+        } catch {}
+      }
+    });
+
+    return () => {
+      if (unsubWidget) unsubWidget();
+      if (unsubDesign) unsubDesign();
+    };
   }, []);
 
   // Initialize verified logs from storage without injecting any mock seed records
@@ -267,11 +382,32 @@ export default function App() {
     status: cameraStatus,
     permissionState: cameraPermissionState,
     error: cameraError,
+    diagnostics: cameraDiagnostics,
     startCamera,
     stopCamera,
+    resetRecovery,
+    setMeetingYieldActive,
+    setConcurrentAppName,
   } = useCamera({ keepAliveOnUnmount: true });
 
+  // Sync glasses mode setting with detectors and telemetry
+  useEffect(() => {
+    blinkDetectorRef.current.setGlassesMode(isGlassesMode);
+    exerciseBlinkDetectorRef.current.setGlassesMode(isGlassesMode);
+    try {
+      localStorage.setItem('iris_glasses_mode_enabled', String(isGlassesMode));
+    } catch {}
+    setTelemetry((prev) => ({
+      ...prev,
+      isGlassesMode,
+      cameraDiagnostics,
+    }));
+  }, [isGlassesMode, cameraDiagnostics]);
+
   const monitoringState: MonitoringState = (() => {
+    if (cameraDiagnostics.cameraMode === 'STANDBY_LOCKED') {
+      return 'CAMERA_BUSY';
+    }
     if (cameraStatus === 'requesting_permission' || cameraStatus === 'initializing') {
       return 'STARTING';
     }
@@ -304,6 +440,9 @@ export default function App() {
   })();
 
   const eyeDetectionState: EyeDetectionState = (() => {
+    if (cameraDiagnostics.cameraMode === 'STANDBY_LOCKED') {
+      return 'Detection unavailable';
+    }
     if (!isMonitoring || cameraStatus !== 'running') {
       return 'Detection unavailable';
     }
@@ -466,7 +605,9 @@ export default function App() {
       setLogs((prev) => TelemetryStorageService.addSessionLog(startLog));
     } catch (err) {
       console.warn('Start camera monitoring encountered error:', err);
-      userStoppedMonitoringRef.current = true;
+      if (cameraDiagnostics.cameraMode !== 'RECOVERING') {
+        userStoppedMonitoringRef.current = true;
+      }
       setIsMonitoring(false);
       setTelemetry((prev) => ({
         ...prev,
@@ -539,6 +680,60 @@ export default function App() {
     [isMonitoring, startMonitoring]
   );
 
+  // Intelligent Meeting Mode & Concurrent Camera Handshake (Windows Frame Server Shared Mode)
+  useEffect(() => {
+    const unsubYield = window.irisNative?.onMeetingCameraYield?.((data) => {
+      const activeMeeting =
+        data && typeof data === 'object' && 'activeMeetingName' in data
+          ? (data as any).activeMeetingName
+          : 'Video Meeting';
+      setConcurrentAppName(activeMeeting);
+      setModeNotice({
+        message: `IRIS operating in Windows Shared Camera mode alongside ${activeMeeting}.`,
+        type: 'info',
+      });
+      if (modeNoticeTimerRef.current) clearTimeout(modeNoticeTimerRef.current);
+      modeNoticeTimerRef.current = setTimeout(() => {
+        setModeNotice(null);
+      }, 5000);
+    });
+
+    const unsubConcurrent = window.irisNative?.onConcurrentCameraApp?.((info) => {
+      const appName = info?.appName || info?.activeMeetingName || 'External Camera App';
+      setConcurrentAppName(appName);
+      setModeNotice({
+        message: `Camera sharing active with ${appName} (Windows Frame Server).`,
+        type: 'info',
+      });
+      if (modeNoticeTimerRef.current) clearTimeout(modeNoticeTimerRef.current);
+      modeNoticeTimerRef.current = setTimeout(() => {
+        setModeNotice(null);
+      }, 5000);
+    });
+
+    const unsubConcurrentCleared = window.irisNative?.onConcurrentCameraAppCleared?.(() => {
+      setConcurrentAppName(null);
+    });
+
+    const unsubResume = window.irisNative?.onResumeCameraMonitoring?.(async () => {
+      setConcurrentAppName(null);
+      setMeetingYieldActive(false);
+      resetRecovery();
+
+      // Auto-resume only if monitoring was paused
+      if (!userStoppedMonitoringRef.current && !isMonitoring) {
+        await startMonitoring();
+      }
+    });
+
+    return () => {
+      if (unsubYield) unsubYield();
+      if (unsubConcurrent) unsubConcurrent();
+      if (unsubConcurrentCleared) unsubConcurrentCleared();
+      if (unsubResume) unsubResume();
+    };
+  }, [isMonitoring, startMonitoring, setMeetingYieldActive, setConcurrentAppName, resetRecovery]);
+
   // Auto-monitoring on app startup/begin: as soon as the app starts up or begins,
   // automatically open the camera and start monitoring the eyes without waiting for user click.
   // In desktop daemon / hidden boot mode, begins background eye awareness immediately.
@@ -547,25 +742,41 @@ export default function App() {
     const isDesktopHidden =
       typeof window !== 'undefined' && Boolean((window as any).irisNative?.isStartedHidden?.());
 
+    if (userStoppedMonitoringRef.current || isMonitoring) {
+      return;
+    }
+
     if (
       (currentUser || isDesktop || isDesktopHidden) &&
       hasCompletedOnboarding &&
       !isOnboardingOpen &&
       !isStyleChooserOpen &&
-      !isMonitoring &&
-      !autoStartAttemptedRef.current &&
-      !userStoppedMonitoringRef.current &&
       cameraStatus !== 'requesting_permission' &&
-      cameraStatus !== 'initializing' &&
       cameraStatus !== 'error'
     ) {
-      autoStartAttemptedRef.current = true;
-      const timer = setTimeout(() => {
-        if (!userStoppedMonitoringRef.current && !isMonitoring) {
-          startMonitoring();
+      const attemptAutoStart = () => {
+        if (userStoppedMonitoringRef.current || isMonitoring) return;
+        if (videoRef.current) {
+          startMonitoring().catch(() => {});
         }
-      }, isDesktopHidden ? 50 : 150);
-      return () => clearTimeout(timer);
+      };
+
+      const timer = setTimeout(attemptAutoStart, isDesktopHidden ? 50 : 200);
+      const interval = setInterval(() => {
+        if (userStoppedMonitoringRef.current || isMonitoring) {
+          clearInterval(interval);
+          return;
+        }
+        if (videoRef.current) {
+          attemptAutoStart();
+          clearInterval(interval);
+        }
+      }, 500);
+
+      return () => {
+        clearTimeout(timer);
+        clearInterval(interval);
+      };
     }
   }, [
     currentUser,
@@ -584,7 +795,7 @@ export default function App() {
       return;
     }
 
-    let animationFrameId: number;
+    let animationFrameId: number | null = null;
     let loopTimerId: any = null;
     let isCancelled = false;
     let lastProcessedVideoTime = -1;
@@ -600,15 +811,8 @@ export default function App() {
 
     const scheduleNextIteration = (loopFn: () => void) => {
       if (isCancelled) return;
-      const isHidden = Boolean(
-        isDocumentHiddenRef.current || (typeof document !== 'undefined' && document.hidden)
-      );
-      if (isHidden) {
-        // Low-CPU 10 FPS timer loop in background daemon mode (E-Core bound)
-        loopTimerId = setTimeout(loopFn, 100);
-      } else {
-        animationFrameId = requestAnimationFrame(loopFn);
-      }
+      // Dedicated unthrottled 25 FPS (~40ms) ticker ensures blink detection works continuously whether mainWindow is hidden or visible
+      loopTimerId = setTimeout(loopFn, 40);
     };
 
     const initAndRun = async () => {
@@ -645,7 +849,8 @@ export default function App() {
         ) {
           const nowTime = performance.now();
           const currentVideoTime = videoEl.currentTime;
-          const minFrameInterval = isHidden ? 90 : 32;
+          // Smooth 24-26 FPS (~38ms interval) guarantees continuous blink detection without dropped frames
+          const minFrameInterval = 38;
           const isNewFrame =
             Math.abs(currentVideoTime - lastProcessedVideoTime) > 0.0001 ||
             nowTime - lastInferenceTime >= minFrameInterval;
@@ -748,14 +953,27 @@ export default function App() {
             const now = detection.timestamp;
             const distanceResult = distanceEstimator.estimateDistance(detection.landmarks);
 
-            // Process landmarks with shared hysteresis & temporal validation
+            // Process landmarks with shared hysteresis, neural blendshapes & temporal validation
             const blinkResult = blinkDetector.processLandmarks(
               detection.landmarks,
               now,
               detection.blendshapes,
               distanceResult.headPose,
-              validObservationSecondsRef.current + rawDeltaSec
+              validObservationSecondsRef.current + rawDeltaSec,
+              isBlinkChallengeActiveRef.current
             );
+
+            // Instantaneous blink pulse detection for live widget counter & immediate UI rolling window update
+            if (blinkResult.totalBlinks > lastEmittedBlinkCountRef.current) {
+              lastEmittedBlinkCountRef.current = blinkResult.totalBlinks;
+              const liveRollingBpm = blinkDetector.getRollingBlinkRate(now, validObservationSecondsRef.current + rawDeltaSec);
+              window.irisNative?.sendBlinkDetected?.({
+                timestamp: Date.now(),
+                totalBlinks: blinkResult.totalBlinks,
+                blinkRate: liveRollingBpm,
+              });
+              lastBlinkCompletionGraceMsRef.current = Date.now();
+            }
 
             // Only accumulate valid observation duration when eye measurements are reliable
             if (blinkResult.isReliable) {
@@ -804,6 +1022,108 @@ export default function App() {
               }
 
               const nowMs = Date.now();
+
+              // Update rolling continuous buffers
+              if (dynamicBlinkRate !== null && dynamicBlinkRate > 0) {
+                lastKnownBlinkRateRef.current = dynamicBlinkRate;
+              } else if (rollingBlinkRate !== null && rollingBlinkRate !== undefined && rollingBlinkRate > 0) {
+                lastKnownBlinkRateRef.current = rollingBlinkRate;
+              }
+              if (calibratedDistance !== null && calibratedDistance > 0) {
+                const alpha = Math.abs(lastKnownDistanceCmRef.current - calibratedDistance) > 8 ? 0.45 : 0.2;
+                lastKnownDistanceCmRef.current = Math.round(
+                  lastKnownDistanceCmRef.current * (1 - alpha) + calibratedDistance * alpha
+                );
+              }
+
+              // Instant distance reactivity (< 38cm for >= 600ms -> alert, >= 40cm for >= 400ms -> recover)
+              if (calibratedDistance !== null && calibratedDistance < 38) {
+                rawNormalDistanceStartMsRef.current = null;
+                if (rawTooCloseStartMsRef.current === null) {
+                  rawTooCloseStartMsRef.current = nowMs;
+                } else if (nowMs - rawTooCloseStartMsRef.current >= 600) {
+                  if (!isTooCloseRef.current) {
+                    isTooCloseRef.current = true;
+                    // Level-triggered: immediately notify widget
+                    window.irisNative?.sendLiveTelemetry?.({
+                      blinkRate: dynamicBlinkRate !== null ? dynamicBlinkRate : (rollingBlinkRate ?? lastKnownBlinkRateRef.current),
+                      screenDistance: calibratedDistance,
+                      isTracking: blinkResult.isReliable,
+                      faceDetected: true,
+                      fatigueScore: dynamicFatigue,
+                      activeMode: ((prev.activeMode || 'default').toLowerCase()) as BehaviorMode,
+                      isTooClose: true,
+                      secondsSinceLastBlink: 0,
+                      requiredBlinks: isBlinkChallengeActiveRef.current ? 1 : 0,
+                      isBlinkAlert: isBlinkChallengeActiveRef.current,
+                      isDistanceAlert: true,
+                    });
+                  }
+                }
+              } else if (calibratedDistance !== null && calibratedDistance >= 40) {
+                rawTooCloseStartMsRef.current = null;
+                if (rawNormalDistanceStartMsRef.current === null) {
+                  rawNormalDistanceStartMsRef.current = nowMs;
+                } else if (nowMs - rawNormalDistanceStartMsRef.current >= 400) {
+                  if (isTooCloseRef.current) {
+                    isTooCloseRef.current = false;
+                    // Level-triggered: immediately notify widget of recovery!
+                    window.irisNative?.sendLiveTelemetry?.({
+                      blinkRate: dynamicBlinkRate !== null ? dynamicBlinkRate : (rollingBlinkRate ?? lastKnownBlinkRateRef.current),
+                      screenDistance: calibratedDistance,
+                      isTracking: blinkResult.isReliable,
+                      faceDetected: true,
+                      fatigueScore: dynamicFatigue,
+                      activeMode: ((prev.activeMode || 'default').toLowerCase()) as BehaviorMode,
+                      isTooClose: false,
+                      secondsSinceLastBlink: 0,
+                      requiredBlinks: isBlinkChallengeActiveRef.current ? 1 : 0,
+                      isBlinkAlert: isBlinkChallengeActiveRef.current,
+                      isDistanceAlert: false,
+                    });
+                  }
+                }
+              }
+
+              // Deterministic 1, 2, or 3 blink target evaluation
+              const secondsSinceLastBlink = blinkResult.lastBlinkTime ? Math.max(0, (now - blinkResult.lastBlinkTime) / 1000) : 0;
+              const inGraceWindow = nowMs - lastBlinkCompletionGraceMsRef.current < 45000;
+              let calculatedRequiredBlinks = 0;
+              const effectiveRate = dynamicBlinkRate !== null ? dynamicBlinkRate : (rollingBlinkRate ?? lastKnownBlinkRateRef.current);
+
+              if (!inGraceWindow && blinkResult.isReliable && validSec >= 6) {
+                if (secondsSinceLastBlink >= 15 || effectiveRate <= 5) {
+                  calculatedRequiredBlinks = 3;
+                } else if (secondsSinceLastBlink >= 10 || effectiveRate <= 10) {
+                  calculatedRequiredBlinks = 2;
+                } else if (secondsSinceLastBlink >= 6 || effectiveRate < 15) {
+                  calculatedRequiredBlinks = 1;
+                }
+              }
+
+              isBlinkChallengeActiveRef.current = calculatedRequiredBlinks > 0;
+
+              // Explicit alert state evaluation for Floating Widget and Gaming Mode edge lighting
+              const isBlinkAlertActive = !inGraceWindow && (calculatedRequiredBlinks > 0 || (effectiveRate > 0 && effectiveRate < 15));
+              const isDistanceAlertActive = Boolean(isTooCloseRef.current);
+
+              // Throttled continuous rolling telemetry broadcast to Floating Widget & Screen-Edge Lighting (every 500ms)
+              if (nowMs - lastWidgetTelemetrySyncMsRef.current >= 500) {
+                lastWidgetTelemetrySyncMsRef.current = nowMs;
+                window.irisNative?.sendLiveTelemetry?.({
+                  blinkRate: dynamicBlinkRate !== null ? dynamicBlinkRate : (rollingBlinkRate ?? lastKnownBlinkRateRef.current),
+                  screenDistance: calibratedDistance !== null ? calibratedDistance : lastKnownDistanceCmRef.current,
+                  isTracking: blinkResult.isReliable,
+                  faceDetected: true,
+                  fatigueScore: dynamicFatigue,
+                  activeMode: ((prev.activeMode || 'default').toLowerCase()) as BehaviorMode,
+                  isTooClose: isTooCloseRef.current,
+                  secondsSinceLastBlink: Math.round(secondsSinceLastBlink),
+                  requiredBlinks: calculatedRequiredBlinks,
+                  isBlinkAlert: isBlinkAlertActive,
+                  isDistanceAlert: isDistanceAlertActive,
+                });
+              }
 
               // Record real live telemetry point every 2.5s once valid observations exist
               if (
@@ -944,6 +1264,23 @@ export default function App() {
                 totalSec > 0.5
                   ? Math.min(100, Math.round((validSec / totalSec) * 100))
                   : 100;
+              const nowLiveMs = Date.now();
+              if (nowLiveMs - lastWidgetTelemetrySyncMsRef.current >= 600) {
+                lastWidgetTelemetrySyncMsRef.current = nowLiveMs;
+                window.irisNative?.sendLiveTelemetry?.({
+                  blinkRate: lastKnownBlinkRateRef.current,
+                  screenDistance: lastKnownDistanceCmRef.current,
+                  isTracking: false,
+                  faceDetected: false,
+                  fatigueScore: null,
+                  activeMode: ((telemetry.activeMode || 'default').toLowerCase()) as BehaviorMode,
+                  isTooClose: isTooCloseRef.current,
+                  secondsSinceLastBlink: 0,
+                  requiredBlinks: 0,
+                  isBlinkAlert: false,
+                  isDistanceAlert: isTooCloseRef.current,
+                });
+              }
               setTelemetry((prev) => ({
                 ...prev,
                 faceDetected: false,
@@ -968,7 +1305,7 @@ export default function App() {
 
     return () => {
       isCancelled = true;
-      cancelAnimationFrame(animationFrameId);
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (loopTimerId) clearTimeout(loopTimerId);
       blinkDetector.resetTransientState();
       landmarkerService.dispose();
@@ -1020,10 +1357,61 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleChangeMode = (mode: BehaviorMode) => {
+  const handleResetAutoMode = useCallback(async () => {
+    if (window.irisNative?.resetAutoMode) {
+      try {
+        const res = await window.irisNative.resetAutoMode();
+        setTelemetry((prev) => ({
+          ...prev,
+          activeMode: res.activeMode,
+          isManualModeOverride: false,
+          distanceOptimal: res.activeMode === 'gaming' ? 35 : res.activeMode === 'meeting' ? 45 : 40,
+        }));
+        setModeNotice({
+          message: `Auto-Detect Mode active. Mode set to ${res.activeMode.toUpperCase()}.`,
+          type: 'info',
+        });
+        if (modeNoticeTimerRef.current) clearTimeout(modeNoticeTimerRef.current);
+        modeNoticeTimerRef.current = setTimeout(() => setModeNotice(null), 3500);
+      } catch (err) {
+        console.warn('Failed to reset auto mode:', err);
+      }
+    }
+  }, []);
+
+  const handleChangeMode = async (mode: BehaviorMode) => {
+    // If clicking the current active mode while in manual override, seamlessly toggle back to auto-detect
+    if (telemetry.isManualModeOverride && mode === telemetry.activeMode) {
+      await handleResetAutoMode();
+      return;
+    }
+
+    if (window.irisNative?.validateAndSetMode) {
+      try {
+        const result = await window.irisNative.validateAndSetMode(mode);
+        setTelemetry((prev) => ({
+          ...prev,
+          activeMode: result.activeMode,
+          isManualModeOverride: true,
+          distanceOptimal: result.activeMode === 'gaming' ? 35 : result.activeMode === 'meeting' ? 45 : 40,
+        }));
+        setModeNotice({
+          message: `Manual Override: Switched to ${result.activeMode.toUpperCase()} mode.`,
+          type: 'info',
+        });
+        if (modeNoticeTimerRef.current) clearTimeout(modeNoticeTimerRef.current);
+        modeNoticeTimerRef.current = setTimeout(() => setModeNotice(null), 3000);
+        return;
+      } catch (err) {
+        console.warn('Native mode set failed, falling back:', err);
+      }
+    }
+
+    window.irisNative?.changeWidgetMode?.(mode);
     setTelemetry((prev) => ({
       ...prev,
       activeMode: mode,
+      isManualModeOverride: true,
       distanceOptimal: mode === 'gaming' ? 35 : mode === 'meeting' ? 45 : 40,
     }));
   };
@@ -1291,6 +1679,26 @@ export default function App() {
           onOpenDocs={() => setIsDocsModalOpen(true)}
         />
 
+        {/* Active Mode Validation Notice Toast */}
+        {modeNotice && (
+          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] max-w-lg w-full px-4 animate-in fade-in slide-in-from-top-3 duration-200">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-neutral-900/95 border border-amber-500/40 shadow-2xl backdrop-blur-md text-amber-200 text-sm">
+              <svg className="w-5 h-5 flex-shrink-0 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+              </svg>
+              <span className="flex-1 font-medium">{modeNotice.message}</span>
+              <button
+                type="button"
+                onClick={() => setModeNotice(null)}
+                className="text-neutral-400 hover:text-white transition p-1"
+                title="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Dynamic Route View - Fits viewport for OCURE and RETIS */}
         <main
           style={
@@ -1337,6 +1745,11 @@ export default function App() {
                 onToggleMonitoring={handleToggleMonitoring}
                 onOpenCalibration={() => setIsCalibrationOpen(true)}
                 onOpenBlinkAudit={() => setIsDebugModalOpen(true)}
+                isGlassesMode={isGlassesMode}
+                onToggleGlassesMode={() => setIsGlassesMode((prev) => !prev)}
+                onOpenCameraPanel={() => setIsCameraPanelOpen(true)}
+                isManualModeOverride={Boolean(telemetry.isManualModeOverride)}
+                onResetAutoMode={handleResetAutoMode}
               />
             )}
 
@@ -1404,6 +1817,8 @@ export default function App() {
         onQuickCalibrate={handleCalibrateDistance}
         onOpenOnboarding={() => setIsOnboardingOpen(true)}
         onOpenDocs={() => setIsDocsModalOpen(true)}
+        widgetDesign={widgetDesign}
+        onChangeWidgetDesign={handleChangeWidgetDesign}
       />
 
       {/* Screen Distance Calibration Modal */}
@@ -1427,6 +1842,21 @@ export default function App() {
         onToggleMonitoring={handleToggleMonitoring}
         rawLandmarks={latestLandmarksRef.current}
         videoElement={videoRef.current}
+      />
+
+      {/* Camera Compatibility & Glasses Detection Status Panel */}
+      <CameraCompatibilityPanel
+        isOpen={isCameraPanelOpen}
+        onClose={() => setIsCameraPanelOpen(false)}
+        diagnostics={cameraDiagnostics}
+        isGlassesMode={isGlassesMode}
+        onToggleGlassesMode={() => setIsGlassesMode((prev) => !prev)}
+        onResetRecovery={resetRecovery}
+        isMonitoring={isMonitoring}
+        onToggleMonitoring={handleToggleMonitoring}
+        onOpenCalibration={() => setIsCalibrationOpen(true)}
+        isDark={isDark}
+        isLiquidGlass={widgetDesign === 'liquid-glass'}
       />
 
       {/* Onboarding Specs & 14-Point QA Test Plan Modal */}

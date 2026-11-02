@@ -61,7 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => onSelectTab('dashboard')}
               className="flex items-center gap-3 cursor-pointer transition-opacity hover:opacity-90 group"
             >
-              <OrbitingEyeLogo size={36} className="w-9 h-9 group-hover:scale-105 transition-transform" />
+              <OrbitingEyeLogo size={36} className="w-9 h-9 transform scale-110 group-hover:scale-115 transition-transform" />
               <div className="flex flex-col">
                 <span className="font-cormorant text-2xl tracking-tight font-bold leading-none">
                   IRIS

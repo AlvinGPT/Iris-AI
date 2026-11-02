@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { TelemetryState } from '../types';
+import { OrbitingEyeLogo } from './OrbitingEyeLogo';
 import {
   ROUTINES,
   ROUTINE_ORDER,
@@ -55,6 +56,7 @@ import {
   setStoredCameraCheckPref,
 } from '../services/ocureService';
 import { ocureVoiceService } from '../services/ocureVoiceService';
+import { ttsService } from '../services/ttsService';
 
 export type SessionState =
   | 'ready'
@@ -197,13 +199,47 @@ export const OcureScreen: React.FC<OcureScreenProps> = ({
   const midStepNudgeSpokenStepRef = useRef<number>(-1);
 
   // Coach voice preference & runtime state
-  const [voiceAvailable] = useState<boolean>(() => ocureVoiceService.isAvailable());
+  const [voiceAvailable, setVoiceAvailable] = useState<boolean>(() => ocureVoiceService.isAvailable());
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(() => ocureVoiceService.isEnabled());
   const [isCoachSpeaking, setIsCoachSpeaking] = useState<boolean>(() =>
     ocureVoiceService.isSpeaking()
   );
   const [lastSpokenLineText, setLastSpokenLineText] = useState<string>('');
   const lastSpokenCueKeyRef = useRef<string>('');
+
+  // Non-blocking asynchronous voice detection & attachment
+  useEffect(() => {
+    const loadVoice = () => {
+      try {
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          const voices = window.speechSynthesis.getVoices();
+          if (voices && voices.length > 0) {
+            ocureVoiceService.loadBrowserVoices();
+            setVoiceAvailable(ocureVoiceService.isAvailable());
+          }
+        }
+      } catch (err) {
+        console.warn('[OCURE] Non-fatal voice loading error:', err);
+      }
+    };
+
+    loadVoice();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.onvoiceschanged = loadVoice;
+      } catch {}
+    }
+
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          if (window.speechSynthesis.onvoiceschanged === loadVoice) {
+            window.speechSynthesis.onvoiceschanged = null;
+          }
+        } catch {}
+      }
+    };
+  }, []);
 
   const getActiveGuidedCue = useCallback(
     (
@@ -1304,7 +1340,8 @@ export const OcureScreen: React.FC<OcureScreenProps> = ({
       {/* Top Header Row (Compact, Single-Line Responsive Header) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1 pb-2 border-b-2 border-black/15 shrink-0">
         <div className="flex flex-col">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <OrbitingEyeLogo size={36} className="w-9 h-9 shrink-0" />
             <h1 className="font-cormorant text-2xl sm:text-3xl font-bold tracking-tight">
               OCURE Coach
             </h1>
@@ -1465,10 +1502,9 @@ export const OcureScreen: React.FC<OcureScreenProps> = ({
               <video
                 ref={videoRef}
                 poster={MASCOT_STILL_FALLBACK}
-                onError={() => {
-                  if (videoRef.current?.error) {
-                    setVideoError(true);
-                  }
+                onError={(e) => {
+                  console.warn('[OCURE] Video demonstration unavailable, falling back to mascot still:', e);
+                  setVideoError(true);
                 }}
                 onLoadedData={() => {
                   setVideoError(false);
@@ -1488,6 +1524,9 @@ export const OcureScreen: React.FC<OcureScreenProps> = ({
                     src={MASCOT_STILL_FALLBACK}
                     alt="OCURE Mascot"
                     draggable={false}
+                    onError={(e) => {
+                      console.warn('[OCURE] Mascot still fallback unavailable:', e);
+                    }}
                     className="w-full h-full object-contain object-center select-none"
                   />
                   <span className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/65 text-white text-xs opacity-85 backdrop-blur-sm whitespace-nowrap">

@@ -1,3 +1,43 @@
+export type CameraStatus =
+  | 'idle'
+  | 'requesting_permission'
+  | 'initializing'
+  | 'running'
+  | 'calibrating'
+  | 'paused'
+  | 'stopping'
+  | 'error'
+  | 'recovering';
+
+export type CameraPermissionState =
+  | 'Permission not requested'
+  | 'Requesting permission'
+  | 'Permission granted'
+  | 'Camera blocked'
+  | 'Permission denied'
+  | 'Camera unavailable'
+  | 'Camera in use by another application'
+  | 'Standby (Exclusive Hardware Lock by External App)'
+  | 'Monitoring active'
+  | 'Camera initialization failed';
+
+export type CameraAccessMode =
+  | 'SHARED_FRAME_SERVER'
+  | 'EXCLUSIVE'
+  | 'STANDBY_EXCLUSIVE_LOCK'
+  | 'STANDBY_LOCKED'
+  | 'RECOVERING';
+
+export interface CameraStreamDiagnostics {
+  width: number;
+  height: number;
+  fps: number;
+  isMuted: boolean;
+  cameraMode: CameraAccessMode;
+  retryAttempts: number;
+  concurrentAppName: string | null;
+}
+
 export type ActiveTab = 'dashboard' | 'ocure' | 'retis' | 'logs';
 
 export type BehaviorMode = 'gaming' | 'default' | 'meeting';
@@ -85,6 +125,9 @@ export interface TelemetryState {
   interOcularRatio?: number | null;
   faceWidthRatio?: number | null;
   candidateLogs?: BlinkCandidateLog[];
+  isGlassesMode?: boolean;
+  cameraDiagnostics?: CameraStreamDiagnostics;
+  isManualModeOverride?: boolean;
 }
 
 export interface BlinkDebugSample {
@@ -119,16 +162,6 @@ export interface EyeBreakLog {
   notes?: string;
 }
 
-export type CameraStatus =
-  | 'idle'
-  | 'requesting_permission'
-  | 'initializing'
-  | 'running'
-  | 'calibrating'
-  | 'paused'
-  | 'stopping'
-  | 'error';
-
 export interface VisionTelemetry {
   isTracking: boolean;
   faceDetected: boolean;
@@ -157,17 +190,6 @@ export interface CalibrationData {
   relativeDistanceBaseline?: number;
   calibrationValid?: boolean;
 }
-
-export type CameraPermissionState =
-  | 'Permission not requested'
-  | 'Requesting permission'
-  | 'Permission granted'
-  | 'Permission denied'
-  | 'Camera blocked'
-  | 'Camera unavailable'
-  | 'Camera in use by another application'
-  | 'Camera initialization failed'
-  | 'Monitoring active';
 
 export interface StoredAggregateTelemetry {
   timestamp: number;
@@ -318,3 +340,109 @@ export interface OnboardingState {
   calibrationSucceeded: boolean;
   calibrationSaved: boolean;
 }
+
+export interface WidgetState {
+  activeMode: BehaviorMode;
+  widgetDesign?: 'liquid-glass' | 'dark-vivid';
+  telemetry: {
+    blinkRate: number | null;
+    screenDistance: number | null;
+    isTracking: boolean;
+    faceDetected?: boolean;
+    fatigueScore: number | null;
+    isTooClose?: boolean;
+    secondsSinceLastBlink?: number;
+    requiredBlinks?: number;
+  };
+  responsiveScale: number;
+  savedPosition?: { x?: number; y?: number };
+  workArea?: { x: number; y: number; width: number; height: number };
+}
+
+export interface MegaMaximizeAlertData {
+  active: boolean;
+  type?: 'blink' | 'distance' | 'both';
+  headline?: string;
+  target?: number;
+  blinksCompleted?: number;
+  displayBlink?: number;
+  displayDist?: number;
+}
+
+export interface EdgeOverlayState {
+  activeMode: BehaviorMode;
+  blinkAlert: boolean;
+  distanceAlert: boolean;
+  blinkRate: number | null;
+  screenDistance: number | null;
+}
+
+declare global {
+  interface Window {
+    irisNative?: {
+      isDesktop?: boolean;
+      getPlatformInfo?: () => Promise<any>;
+      getFirebaseCredentials?: () => Promise<any>;
+      getFirebaseApiKey?: () => string | null;
+      isStartupEnabled?: () => Promise<boolean>;
+      setStartupEnabled?: (enabled: boolean) => Promise<boolean>;
+      saveCustomApiKey?: (key: string) => Promise<any>;
+      hasConfiguredApiKey?: () => Promise<boolean>;
+      toggleEcoQoS?: (enabled: boolean) => Promise<any>;
+      minimizeToTray?: () => Promise<any>;
+      isStartedHidden?: () => boolean;
+      minimizeWindow?: () => Promise<any>;
+      maximizeWindow?: () => Promise<any>;
+      closeWindow?: () => Promise<any>;
+      openGoogleLogin?: () => Promise<any>;
+      focusMainWindow?: () => Promise<any>;
+      onAuthDesktopSuccess?: (callback: (data: any) => void) => () => void;
+      sendLiveTelemetry?: (data: {
+        blinkRate: number | null;
+        screenDistance: number | null;
+        isTracking: boolean;
+        faceDetected?: boolean;
+        fatigueScore: number | null;
+        activeMode: BehaviorMode;
+        isTooClose?: boolean;
+        secondsSinceLastBlink?: number;
+        requiredBlinks?: number;
+        isBlinkAlert?: boolean;
+        isDistanceAlert?: boolean;
+      }) => void;
+      sendBlinkDetected?: (data?: { timestamp: number; totalBlinks: number; blinkRate: number | null }) => void;
+      changeWidgetMode?: (mode: BehaviorMode) => Promise<any>;
+      validateAndSetMode?: (mode: BehaviorMode) => Promise<{ allowed: boolean; activeMode: BehaviorMode; isManualModeOverride?: boolean; reason?: string }>;
+      getModeState?: () => Promise<{ currentActiveMode: BehaviorMode; isManualModeOverride: boolean; autoDetectedMode: BehaviorMode | null }>;
+      resetAutoMode?: () => Promise<{ success: boolean; activeMode: BehaviorMode; isManualModeOverride: boolean }>;
+      notifyBlinkChallengeCompleted?: () => void;
+      onBlinkChallengeCompleted?: (callback: () => void) => () => void;
+      getWidgetState?: () => Promise<WidgetState>;
+      resizeWidget?: (width: number, height: number) => Promise<any>;
+      saveWidgetPosition?: (x: number, y: number) => void;
+      moveWidgetWindow?: (deltaX: number, deltaY: number) => void;
+      setWidgetIgnoreMouseEvents?: (ignore: boolean, options?: { forward?: boolean }) => void;
+      onWidgetStateUpdate?: (callback: (data: WidgetState) => void) => () => void;
+      onLiveBlinkDetected?: (callback: (data?: { timestamp: number; totalBlinks: number; blinkRate: number | null }) => void) => () => void;
+      onEdgeOverlayUpdate?: (callback: (data: EdgeOverlayState) => void) => () => void;
+      getConcurrentCameraStatus?: () => Promise<{
+        hasMeeting: boolean;
+        activeMeetingName: string | null;
+        platform: string;
+        isWindowsNative: boolean;
+        isSharedModeSupported: boolean;
+      }>;
+      onConcurrentCameraApp?: (callback: (data: { activeMeetingName?: string; appName?: string }) => void) => () => void;
+      onConcurrentCameraAppCleared?: (callback: () => void) => () => void;
+      onMeetingCameraYield?: (callback: (data?: { activeMeetingName?: string; isSharedMode?: boolean }) => void) => () => void;
+      onResumeCameraMonitoring?: (callback: () => void) => () => void;
+      setMegaMaximizeAlert?: (data: MegaMaximizeAlertData) => void;
+      onMegaMaximizeUpdate?: (callback: (data: MegaMaximizeAlertData) => void) => () => void;
+      notifyMegaMaximizeCompleted?: () => void;
+      setWidgetDesign?: (designStyle: 'liquid-glass' | 'dark-vivid') => Promise<{ success: boolean; designStyle: 'liquid-glass' | 'dark-vivid' }>;
+      onWidgetDesignUpdate?: (callback: (designStyle: 'liquid-glass' | 'dark-vivid') => void) => () => void;
+      showWidgetContextMenu?: (coords?: { x: number; y: number }) => void;
+    };
+  }
+}
+

@@ -313,8 +313,9 @@ export class IrisDatabase {
    * Save a completed or updated break log
    */
   public saveBreakLog(log: StoredBreakLogInput): void {
-    const id = log.id || `break_${log.timestamp}_${Math.random().toString(36).substring(2, 7)}`;
-    const timeLabel = log.time || new Date(log.timestamp).toLocaleTimeString();
+    const timestamp = Number(log.timestamp) || Date.now();
+    const id = log.id || `break_${timestamp}_${Math.random().toString(36).substring(2, 7)}`;
+    const timeLabel = log.time || new Date(timestamp).toLocaleTimeString();
     const routineId = log.routineId || log.type || 'standard-break';
     const routineTitle = log.routineTitle || log.type || 'Eye Rest Routine';
     const snapshotStr = log.telemetrySnapshot ? JSON.stringify(log.telemetrySnapshot) : null;
@@ -345,7 +346,7 @@ export class IrisDatabase {
 
     stmt.run({
       id,
-      timestamp: log.timestamp,
+      timestamp,
       time_label: timeLabel,
       routine_id: routineId,
       routine_title: routineTitle,

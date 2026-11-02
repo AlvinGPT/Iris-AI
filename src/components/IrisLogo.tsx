@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { IRIS_LOGO_WHITE_DATA_URL, IRIS_LOGO_BLACK_DATA_URL } from '../assets/irisLogo';
 
 export interface IrisLogoProps {
   /**
@@ -72,38 +73,8 @@ export const IrisLogo: React.FC<IrisLogoProps> = ({
 
   const numSize = parsePixelSize(size);
 
-  // Pick optimal resolution to avoid downloading large originals while staying crisp
-  const { src, srcSet } = useMemo(() => {
-    const color = effectiveVariant;
-    if (numSize <= 16) {
-      return {
-        src: `/assets/iris-emblem-${color}-16.png`,
-        srcSet: `/assets/iris-emblem-${color}-16.png 1x, /assets/iris-emblem-${color}-32.png 2x`,
-      };
-    }
-    if (numSize <= 32) {
-      return {
-        src: `/assets/iris-emblem-${color}-32.png`,
-        srcSet: `/assets/iris-emblem-${color}-32.png 1x, /assets/iris-emblem-${color}-64.png 2x`,
-      };
-    }
-    if (numSize <= 64) {
-      return {
-        src: `/assets/iris-emblem-${color}-64.png`,
-        srcSet: `/assets/iris-emblem-${color}-64.png 1x, /assets/iris-emblem-${color}-128.png 2x`,
-      };
-    }
-    if (numSize <= 128) {
-      return {
-        src: `/assets/iris-emblem-${color}-128.png`,
-        srcSet: `/assets/iris-emblem-${color}-128.png 1x, /assets/iris-emblem-${color}-512.png 2x`,
-      };
-    }
-    return {
-      src: `/assets/iris-emblem-${color}-512.png`,
-      srcSet: `/assets/iris-emblem-${color}-512.png 1x, /assets/iris-emblem-${color}-cropped.png 2x`,
-    };
-  }, [effectiveVariant, numSize]);
+  // Return embedded base64 data-URI directly: 100% reliable across Vite dev and Electron packaged file:// mode!
+  const src = effectiveVariant === 'white' ? IRIS_LOGO_WHITE_DATA_URL : IRIS_LOGO_BLACK_DATA_URL;
 
   const dimensionStyle: React.CSSProperties = {
     width: typeof size === 'number' ? `${size}px` : size,
@@ -114,7 +85,6 @@ export const IrisLogo: React.FC<IrisLogoProps> = ({
   return (
     <img
       src={src}
-      srcSet={srcSet}
       alt={alt}
       width={numSize}
       height={numSize}
